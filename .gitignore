@@ -1,0 +1,18 @@
+# Large Binaries
+firebase_bin
+cloudflared
+
+# PlatformIO build directories and caches
+.pio/
+.vscode/
+
+# Firebase local cache & logs
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+
+# OS and temporary files
+.DS_Store
+*.swp
+*~
+*.log
