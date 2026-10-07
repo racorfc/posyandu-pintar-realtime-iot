@@ -28,17 +28,18 @@
 #define ECHO_PIN 10  // GPIO 10 -> Pin Echo HC-SR04
 
 // Sesuaikan konstanta ini dengan tinggi fisik tiang pengukur Posyandu Anda:
-const float TINGGI_TIANG_CM = 150.0; // Contoh: Tiang pengukur 150.0 cm (1.5 meter)
+const float TINGGI_TIANG_CM = 200.0; // Standar Acuan Tiang: 200.0 cm (2.0 Meter)
 const float BATAS_MIN_BALITA = 30.0;  // Batas minimum tinggi bayi wajar (cm)
-const float BATAS_MAX_BALITA = 140.0; // Batas maksimum tinggi balita wajar (cm)
+const float BATAS_MAX_BALITA = 190.0; // Batas maksimum tinggi wajar (cm)
 
 // ==========================================
 // 2. STRUKTUR PAKET ESP-NOW
 // ==========================================
 typedef struct struct_msg_tinggi {
-  int node_id;      // 3 = Pengukur Tinggi Badan
-  float tinggi_cm;  // Tinggi balita (cm)
-  int status_kode;  // 0 = Normal, 1 = Kosong / Di Luar Rentang
+  int node_id;         // 3 = Pengukur Tinggi Badan
+  float tinggi_cm;     // Tinggi balita (cm) -> 200 - jarak (jika pas 200cm, nilai = 0cm)
+  int status_kode;     // 0 = Normal, 1 = Kosong / Di Luar Rentang
+  float raw_jarak_cm;  // Jarak pantul mentah sensor ke lantai (cm)
 } struct_msg_tinggi;
 
 struct_msg_tinggi myData;
@@ -182,6 +183,7 @@ void loop() {
 
     myData.node_id = 3;
     myData.tinggi_cm = currentTinggiCm;
+    myData.raw_jarak_cm = lastDistanceMeasured;
 
     esp_now_send(broadcastAddress, (uint8_t *)&myData, sizeof(myData));
   }

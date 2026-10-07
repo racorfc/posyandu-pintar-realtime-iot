@@ -96,9 +96,17 @@ TFT_eSprite sprValSuhu   = TFT_eSprite(&tft);
 #define SCREEN_WIFI_SCAN       2
 #define SCREEN_WIFI_KEYBOARD   3
 #define SCREEN_WIFI_CONNECTING 4
+#define SCREEN_CALIBRATION     5
 
 int currentScreen = SCREEN_DASHBOARD;
 bool needFullRedraw = true;
+
+// Variabel Menu Kalibrasi
+int calibTab = 0;                  // 0 = Timbangan, 1 = Pengukur Tinggi
+float calibTargetKg = 5.0f;        // Target beban acuan (fleksibel kustom)
+volatile float liveRawJarakTinggi = 0.0f; // Jarak mentah sensor HC-SR04 ke lantai
+String calibStatusMsg = "";
+unsigned long calibStatusTime = 0;
 
 // Variabel Scanner & Keyboard WiFi
 struct WifiItem {
@@ -130,18 +138,20 @@ typedef struct struct_msg_oxy {
 typedef struct struct_msg_berat {
   int node_id;            // 2
   float berat_kg;
-  int status_kode;
+  int status_kode;        // 0 = Normal, 1 = Tare Sukses, 2 = Kalibrasi Sukses
 } struct_msg_berat;
 
 typedef struct struct_msg_tinggi {
   int node_id;            // 3
   float tinggi_cm;
   int status_kode;
+  float raw_jarak_cm;     // Jarak pantul mentah sensor ke lantai (cm)
 } struct_msg_tinggi;
 
 typedef struct struct_cmd_tare {
   int target_node;  // 2
-  int command;      // 1 = Tare
+  int command;      // 1 = Tare, 2 = Calibrate
+  float target_kg;  // Custom target weight
 } struct_cmd_tare;
 
 uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
@@ -205,11 +215,14 @@ void successBeep() {
 // Forward Declaration GUI
 void drawDashboardScreen();
 void drawTestNodeScreen();
+void drawCalibrationScreen();
 void drawWifiScanScreen();
 void drawKeyboardScreen();
 void drawKeyboardInputBox();
 void connectWifiAndVerify();
 void startWifiScan();
+void sendTareCommandToNode2();
+void sendCalibrateCommandToNode2(float targetKg);
 
 // ==========================================
 // 8. CALLBACK PENERIMA ESP-NOW
@@ -242,15 +255,35 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
     liveBeratKg = n2.berat_kg;
     lastSeenNode2 = millis();
     simTestActive = false;
-    Serial.printf("[CYD ESP-NOW] DITERIMA NODE 2 -> Berat: %.2f kg\n", liveBeratKg);
+
+    if (n2.status_kode == 1) {
+      calibStatusMsg = "TARE BERHASIL (0.00 KG)";
+      calibStatusTime = millis() + 4000;
+      snprintf(toastMsg, sizeof(toastMsg), "NODE 2: TARE SUKSES (0.00 KG)!");
+      toastUntil = millis() + 3000;
+      successBeep();
+    } else if (n2.status_kode == 2) {
+      calibStatusMsg = "KALIBRASI SUKSES DISIMPAN!";
+      calibStatusTime = millis() + 5000;
+      snprintf(toastMsg, sizeof(toastMsg), "NODE 2: KALIBRASI BEBAN SUKSES!");
+      toastUntil = millis() + 3500;
+      successBeep();
+    }
+    Serial.printf("[CYD ESP-NOW] DITERIMA NODE 2 -> Berat: %.2f kg (Status: %d)\n", liveBeratKg, n2.status_kode);
   }
-  else if (incomingId == 3 && len >= sizeof(struct_msg_tinggi)) {
+  else if (incomingId == 3 && len >= 12) {
     struct_msg_tinggi n3;
-    memcpy(&n3, incomingData, sizeof(struct_msg_tinggi));
+    memset(&n3, 0, sizeof(struct_msg_tinggi));
+    memcpy(&n3, incomingData, min((size_t)len, sizeof(struct_msg_tinggi)));
     liveTinggiCm = n3.tinggi_cm;
+    if (len >= (int)sizeof(struct_msg_tinggi)) {
+      liveRawJarakTinggi = n3.raw_jarak_cm;
+    } else {
+      liveRawJarakTinggi = 200.0f - liveTinggiCm;
+    }
     lastSeenNode3 = millis();
     simTestActive = false;
-    Serial.printf("[CYD ESP-NOW] DITERIMA NODE 3 -> Tinggi: %.1f cm\n", liveTinggiCm);
+    Serial.printf("[CYD ESP-NOW] DITERIMA NODE 3 -> Tinggi: %.1f cm (Raw: %.1f cm)\n", liveTinggiCm, liveRawJarakTinggi);
   }
 }
 
@@ -258,8 +291,18 @@ void sendTareCommandToNode2() {
   struct_cmd_tare cmd;
   cmd.target_node = 2;
   cmd.command = 1;
+  cmd.target_kg = 0.0f;
   esp_now_send(broadcastAddress, (uint8_t *)&cmd, sizeof(cmd));
   Serial.println("[ESP-NOW] Mengirim Perintah TARE ke Node 2.");
+}
+
+void sendCalibrateCommandToNode2(float targetKg) {
+  struct_cmd_tare cmd;
+  cmd.target_node = 2;
+  cmd.command = 2;
+  cmd.target_kg = targetKg;
+  esp_now_send(broadcastAddress, (uint8_t *)&cmd, sizeof(cmd));
+  Serial.printf("[ESP-NOW] Mengirim Perintah KALIBRASI BEBAN (%.2f kg) ke Node 2.\n", targetKg);
 }
 
 // ==========================================
@@ -281,19 +324,20 @@ void firebaseIoTask(void *pvParameters) {
     if (!isScanningWifi && currentScreen != SCREEN_WIFI_SCAN && currentScreen != SCREEN_WIFI_KEYBOARD && currentScreen != SCREEN_WIFI_CONNECTING) {
       if (WiFi.status() != WL_CONNECTED) {
         setRgbLed(true, false, false);
-        if (savedSSID.length() > 0 && savedSSID != "x" && millis() - lastWifiAttempt >= 12000) {
+        if (savedSSID.length() > 0 && savedSSID != "x" && millis() - lastWifiAttempt >= 25000) {
           lastWifiAttempt = millis();
-          Serial.printf("[WIFI] Rekoneksi ke %s...\n", savedSSID.c_str());
+          Serial.printf("[WIFI] Rekoneksi ke %s di Channel %d...\n", savedSSID.c_str(), WIFI_FIXED_CHANNEL);
           WiFi.disconnect(false, false);
           delay(50);
-          WiFi.begin(savedSSID.c_str(), savedPass.c_str());
+          WiFi.begin(savedSSID.c_str(), savedPass.c_str(), WIFI_FIXED_CHANNEL);
+          esp_wifi_set_channel(WIFI_FIXED_CHANNEL, WIFI_SECOND_CHAN_NONE);
         }
       } else {
         setRgbLed(false, true, false);
       }
     }
 
-    if (WiFi.status() == WL_CONNECTED && (currentScreen == SCREEN_DASHBOARD || currentScreen == SCREEN_TEST_NODE)) {
+    if (WiFi.status() == WL_CONNECTED && (currentScreen == SCREEN_DASHBOARD || currentScreen == SCREEN_TEST_NODE || currentScreen == SCREEN_CALIBRATION)) {
       unsigned long now = millis();
 
       // B. Simpan Pemeriksaan Balita (POST)
@@ -471,41 +515,51 @@ void drawDashboardStatic() {
   tft.drawString("SUHU TUBUH (C)", 172, 112);
 
   // --- TOMBOL BAWAH ---
-  // 1. TARE
-  tft.fillRoundRect(6, 178, 86, 56, 6, C_DARK_BAR);
-  tft.drawRoundRect(6, 178, 86, 56, 6, C_BORDER);
+  // 1. TARE (X: 6..72, W: 66)
+  tft.fillRoundRect(6, 178, 66, 56, 6, C_DARK_BAR);
+  tft.drawRoundRect(6, 178, 66, 56, 6, C_BORDER);
   tft.setTextDatum(MC_DATUM);
   tft.setTextSize(2);
   tft.setTextColor(C_WHITE, C_DARK_BAR);
-  tft.drawString("TARE", 49, 206);
+  tft.drawString("TARE", 39, 206);
 
-  // 2. SIMPAN DATA (Warna Hijau Emerald Kemenkes, Teks Putih Tegas)
-  tft.fillRoundRect(100, 178, 126, 56, 6, tft.color565(0, 130, 80));
-  tft.drawRoundRect(100, 178, 126, 56, 6, C_GREEN);
+  // 2. SIMPAN DATA (X: 76..178, W: 102)
+  tft.fillRoundRect(76, 178, 102, 56, 6, tft.color565(0, 130, 80));
+  tft.drawRoundRect(76, 178, 102, 56, 6, C_GREEN);
   tft.setTextDatum(MC_DATUM);
   tft.setTextSize(2);
   tft.setTextColor(C_WHITE, tft.color565(0, 130, 80));
-  tft.drawString("SIMPAN", 163, 198);
+  tft.drawString("SIMPAN", 127, 198);
   tft.setTextSize(1);
   tft.setTextColor(C_GREEN, tft.color565(0, 130, 80));
-  tft.drawString("KE CLOUD RTDB", 163, 218);
+  tft.drawString("KE CLOUD RTDB", 127, 218);
 
-  // 3. TAB MENU KE TEST NODE SIMULATOR
-  tft.fillRoundRect(234, 178, 80, 56, 6, tft.color565(18, 30, 55));
-  tft.drawRoundRect(234, 178, 80, 56, 6, C_CYAN);
+  // 3. MENU KALIBRASI (X: 182..248, W: 66)
+  tft.fillRoundRect(182, 178, 66, 56, 6, tft.color565(30, 25, 55));
+  tft.drawRoundRect(182, 178, 66, 56, 6, tft.color565(180, 120, 255));
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextSize(1);
+  tft.setTextColor(tft.color565(200, 150, 255), tft.color565(30, 25, 55));
+  tft.drawString("MENU", 215, 198);
+  tft.setTextColor(C_WHITE, tft.color565(30, 25, 55));
+  tft.drawString("KALIB >", 215, 214);
+
+  // 4. TAB MENU KE TEST NODE SIMULATOR (X: 252..314, W: 62)
+  tft.fillRoundRect(252, 178, 62, 56, 6, tft.color565(18, 30, 55));
+  tft.drawRoundRect(252, 178, 62, 56, 6, C_CYAN);
   tft.setTextDatum(MC_DATUM);
   tft.setTextSize(1);
   tft.setTextColor(C_CYAN, tft.color565(18, 30, 55));
-  tft.drawString("TAB LAB", 274, 198);
+  tft.drawString("TAB LAB", 283, 198);
   tft.setTextColor(C_YELLOW, tft.color565(18, 30, 55));
-  tft.drawString("TEST NODE >", 274, 214);
+  tft.drawString("TEST >", 283, 214);
 }
 
 void drawDashboardDynamic() {
   // Status Indikator Node 1, 2, 3 di Layar CYD (Merah jika offline, Hijau jika ada transmisi riil ESP-NOW)
-  bool n1On = (millis() - lastSeenNode1 < 3500) && (lastSeenNode1 > 0);
-  bool n2On = (millis() - lastSeenNode2 < 3500) && (lastSeenNode2 > 0);
-  bool n3On = (millis() - lastSeenNode3 < 3500) && (lastSeenNode3 > 0);
+  bool n1On = (millis() - lastSeenNode1 < 6500) && (lastSeenNode1 > 0);
+  bool n2On = (millis() - lastSeenNode2 < 6500) && (lastSeenNode2 > 0);
+  bool n3On = (millis() - lastSeenNode3 < 6500) && (lastSeenNode3 > 0);
 
   tft.fillCircle(198, 19, 4, n1On ? C_GREEN : C_RED);
   tft.fillCircle(216, 19, 4, n2On ? C_GREEN : C_RED);
@@ -725,6 +779,241 @@ void drawTestNodeScreen() {
     needFullRedraw = false;
   }
   drawTestNodeDynamic();
+}
+
+// ==========================================
+// 12. SCREEN 5: MENU KALIBRASI SENSOR (WIRELESS ESP-NOW)
+// ==========================================
+void drawCalibrationStatic() {
+  tft.fillScreen(C_BG);
+
+  // Header Bar (Y: 0..30)
+  tft.fillRect(0, 0, 320, 30, C_BG);
+
+  // Tombol < DASH
+  tft.fillRoundRect(6, 4, 60, 24, 4, C_DARK_BAR);
+  tft.drawRoundRect(6, 4, 60, 24, 4, C_BORDER);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextSize(1);
+  tft.setTextColor(C_WHITE, C_DARK_BAR);
+  tft.drawString("< DASH", 36, 16);
+
+  // Judul
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(C_WHITE, C_BG);
+  tft.setTextSize(1);
+  tft.drawString("KALIBRASI", 72, 11);
+
+  // Tab 1: 1. BERAT (X: 172..242)
+  tft.fillRoundRect(172, 4, 70, 24, 4, (calibTab == 0) ? tft.color565(15, 45, 80) : C_DARK_BAR);
+  tft.drawRoundRect(172, 4, 70, 24, 4, (calibTab == 0) ? C_CYAN : C_BORDER);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor((calibTab == 0) ? C_CYAN : C_MUTED, (calibTab == 0) ? tft.color565(15, 45, 80) : C_DARK_BAR);
+  tft.drawString("1. BERAT", 207, 16);
+
+  // Tab 2: 2. TINGGI (X: 246..314)
+  tft.fillRoundRect(246, 4, 68, 24, 4, (calibTab == 1) ? tft.color565(50, 40, 10) : C_DARK_BAR);
+  tft.drawRoundRect(246, 4, 68, 24, 4, (calibTab == 1) ? C_YELLOW : C_BORDER);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor((calibTab == 1) ? C_YELLOW : C_MUTED, (calibTab == 1) ? tft.color565(50, 40, 10) : C_DARK_BAR);
+  tft.drawString("2. TINGGI", 280, 16);
+
+  tft.drawFastHLine(0, 31, 320, C_BORDER);
+
+  if (calibTab == 0) {
+    // ----------------------------------------
+    // TAB 0: KALIBRASI TIMBANGAN (HX711)
+    // ----------------------------------------
+    // Kartu 1: Live Berat
+    tft.fillRoundRect(6, 35, 148, 46, 6, C_CARD_BG);
+    tft.drawRoundRect(6, 35, 148, 46, 6, C_BORDER);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextColor(C_MUTED, C_CARD_BG);
+    tft.setTextSize(1);
+    tft.drawString("BERAT SAAT INI:", 12, 40);
+
+    // Tombol TARE (Nol-kan)
+    tft.fillRoundRect(160, 35, 154, 46, 6, tft.color565(40, 25, 60));
+    tft.drawRoundRect(160, 35, 154, 46, 6, tft.color565(140, 90, 220));
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextSize(2);
+    tft.setTextColor(C_WHITE, tft.color565(40, 25, 60));
+    tft.drawString("TARE (NOL)", 237, 51);
+    tft.setTextSize(1);
+    tft.setTextColor(tft.color565(190, 160, 255), tft.color565(40, 25, 60));
+    tft.drawString("NOL-KAN BEBAN KOSONG", 237, 70);
+
+    // Kartu 2: Pengaturan Target Beban Acuan
+    tft.fillRoundRect(6, 85, 308, 92, 6, C_CARD_BG);
+    tft.drawRoundRect(6, 85, 308, 92, 6, C_BORDER);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextColor(C_MUTED, C_CARD_BG);
+    tft.setTextSize(1);
+    tft.drawString("TARGET BEBAN ACUAN:", 12, 90);
+
+    // Stepper buttons (Y: 106..138)
+    const char* stepLabels[6] = {"-5", "-1", "-0.1", "+0.1", "+1", "+5"};
+    for (int i = 0; i < 6; i++) {
+      int bx = 10 + (i * 51);
+      tft.fillRoundRect(bx, 106, 46, 30, 4, C_DARK_BAR);
+      tft.drawRoundRect(bx, 106, 46, 30, 4, C_BORDER);
+      tft.setTextDatum(MC_DATUM);
+      tft.setTextSize(1);
+      tft.setTextColor(C_WHITE, C_DARK_BAR);
+      tft.drawString(stepLabels[i], bx + 23, 121);
+    }
+
+    // Quick Presets Row (Y: 142..170)
+    const char* prLabels[6] = {"1kg", "5kg", "10kg", "20kg", "50kg", "60kg"};
+    for (int i = 0; i < 6; i++) {
+      int px = 10 + (i * 51);
+      tft.fillRoundRect(px, 142, 46, 26, 4, tft.color565(20, 35, 45));
+      tft.drawRoundRect(px, 142, 46, 26, 4, C_BORDER);
+      tft.setTextDatum(MC_DATUM);
+      tft.setTextSize(1);
+      tft.setTextColor(C_CYAN, tft.color565(20, 35, 45));
+      tft.drawString(prLabels[i], px + 23, 155);
+    }
+
+    // Tombol Eksekusi Kalibrasi Beban (Y: 182..234)
+    tft.fillRoundRect(6, 182, 308, 52, 6, tft.color565(0, 110, 60));
+    tft.drawRoundRect(6, 182, 308, 52, 6, C_GREEN);
+  } else {
+    // ----------------------------------------
+    // TAB 1: PENGUKUR TINGGI (HC-SR04) ACUAN 2.0 METER
+    // ----------------------------------------
+    // Kartu 1: Standar Acuan Tiang (200.0 cm)
+    tft.fillRoundRect(6, 35, 148, 50, 6, C_CARD_BG);
+    tft.drawRoundRect(6, 35, 148, 50, 6, C_BORDER);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextColor(C_MUTED, C_CARD_BG);
+    tft.setTextSize(1);
+    tft.drawString("ACUAN TIANG:", 12, 40);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextSize(2);
+    tft.setTextColor(C_CYAN, C_CARD_BG);
+    tft.drawString("200.0 cm", 80, 64);
+
+    // Kartu 2: Jarak Sensor Riil ke Lantai
+    tft.fillRoundRect(160, 35, 154, 50, 6, C_CARD_BG);
+    tft.drawRoundRect(160, 35, 154, 50, 6, C_BORDER);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextColor(C_MUTED, C_CARD_BG);
+    tft.setTextSize(1);
+    tft.drawString("JARAK KE LANTAI:", 166, 40);
+
+    // Kartu 3: Status Penyesuaian Fisik Tiang (Adjuster Banner)
+    tft.fillRoundRect(6, 90, 308, 58, 6, C_CARD_BG);
+    tft.drawRoundRect(6, 90, 308, 58, 6, C_BORDER);
+
+    // Kartu 4: Panduan Singkat
+    tft.fillRoundRect(6, 154, 308, 80, 6, tft.color565(12, 22, 35));
+    tft.drawRoundRect(6, 154, 308, 80, 6, C_BORDER);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextColor(C_YELLOW, tft.color565(12, 22, 35));
+    tft.setTextSize(1);
+    tft.drawString("PANDUAN SETTING TIANG 2.0 METER:", 14, 160);
+    tft.setTextColor(C_WHITE, tft.color565(12, 22, 35));
+    tft.drawString("- Tiang kosong tanpa balita harus tepat 200.0 cm.", 14, 176);
+    tft.drawString("- Saat jarak pas 200 cm, tinggi balita di CYD = 0.0 cm.", 14, 192);
+    tft.setTextColor(C_CYAN, tft.color565(12, 22, 35));
+    tft.drawString("- Geser sensor/tiang sampai banner di atas HIJAU (PAS).", 14, 208);
+  }
+}
+
+void drawCalibrationDynamic() {
+  if (calibTab == 0) {
+    // Update Live Berat
+    tft.fillRect(12, 54, 136, 22, C_CARD_BG);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(2);
+    tft.setTextColor((liveBeratKg > 0.0) ? C_CYAN : C_WHITE, C_CARD_BG);
+    char bufB[16];
+    snprintf(bufB, sizeof(bufB), "%.2f kg", liveBeratKg);
+    tft.drawString(bufB, 12, 54);
+
+    // Update Target Beban
+    tft.fillRect(170, 88, 138, 16, C_CARD_BG);
+    tft.setTextDatum(TR_DATUM);
+    tft.setTextSize(1);
+    tft.setTextColor(C_YELLOW, C_CARD_BG);
+    char bufT[24];
+    snprintf(bufT, sizeof(bufT), "[ %.2f kg ]", calibTargetKg);
+    tft.drawString(bufT, 306, 90);
+
+    // Update Tombol Eksekusi
+    tft.fillRect(10, 186, 300, 44, tft.color565(0, 110, 60));
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextSize(2);
+    tft.setTextColor(C_WHITE, tft.color565(0, 110, 60));
+    char bufBtn[36];
+    snprintf(bufBtn, sizeof(bufBtn), "KALIBRASI %.2f KG", calibTargetKg);
+    tft.drawString(bufBtn, 160, 200);
+
+    tft.setTextSize(1);
+    if (millis() < calibStatusTime) {
+      tft.setTextColor(C_YELLOW, tft.color565(0, 110, 60));
+      tft.drawString(calibStatusMsg, 160, 220);
+    } else {
+      tft.setTextColor(C_GREEN, tft.color565(0, 110, 60));
+      tft.drawString("KIRIM FAKTOR BARU VIA ESP-NOW", 160, 220);
+    }
+  } else {
+    // Update Jarak Riil ke Lantai
+    tft.fillRect(166, 54, 142, 26, C_CARD_BG);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextSize(2);
+    tft.setTextColor(C_YELLOW, C_CARD_BG);
+    char bufJ[16];
+    snprintf(bufJ, sizeof(bufJ), "%.1f cm", liveRawJarakTinggi);
+    tft.drawString(bufJ, 237, 64);
+
+    // Update Banner Adjuster
+    float dev = liveRawJarakTinggi - 200.0f;
+    if (fabs(dev) <= 0.8f) {
+      tft.fillRoundRect(10, 94, 300, 50, 6, tft.color565(0, 80, 45));
+      tft.drawRoundRect(10, 94, 300, 50, 6, C_GREEN);
+      tft.setTextDatum(MC_DATUM);
+      tft.setTextSize(2);
+      tft.setTextColor(C_GREEN, tft.color565(0, 80, 45));
+      tft.drawString("PAS 2.0 METER (OK)", 160, 110);
+      tft.setTextSize(1);
+      tft.setTextColor(C_WHITE, tft.color565(0, 80, 45));
+      tft.drawString("Posisi Sempurna | Layar CYD: 0.0 cm", 160, 130);
+    } else if (dev < -0.8f) {
+      tft.fillRoundRect(10, 94, 300, 50, 6, tft.color565(60, 45, 10));
+      tft.drawRoundRect(10, 94, 300, 50, 6, C_YELLOW);
+      tft.setTextDatum(MC_DATUM);
+      tft.setTextSize(2);
+      tft.setTextColor(C_YELLOW, tft.color565(60, 45, 10));
+      char bufDev[32];
+      snprintf(bufDev, sizeof(bufDev), "KURANG %.1f CM", fabs(dev));
+      tft.drawString(bufDev, 160, 110);
+      tft.setTextSize(1);
+      tft.setTextColor(C_WHITE, tft.color565(60, 45, 10));
+      tft.drawString("-> NAIKKAN TIANG / SENSOR KE ATAS", 160, 130);
+    } else {
+      tft.fillRoundRect(10, 94, 300, 50, 6, tft.color565(70, 20, 20));
+      tft.drawRoundRect(10, 94, 300, 50, 6, C_RED);
+      tft.setTextDatum(MC_DATUM);
+      tft.setTextSize(2);
+      tft.setTextColor(C_RED, tft.color565(70, 20, 20));
+      char bufDev[32];
+      snprintf(bufDev, sizeof(bufDev), "LEBIH +%.1f CM", dev);
+      tft.drawString(bufDev, 160, 110);
+      tft.setTextSize(1);
+      tft.setTextColor(C_WHITE, tft.color565(70, 20, 20));
+      tft.drawString("-> TURUNKAN TIANG / SENSOR KE BAWAH", 160, 130);
+    }
+  }
+}
+
+void drawCalibrationScreen() {
+  if (needFullRedraw) {
+    drawCalibrationStatic();
+    needFullRedraw = false;
+  }
+  drawCalibrationDynamic();
 }
 
 // ==========================================
@@ -1211,8 +1500,8 @@ void checkTouch() {
       return;
     }
 
-    // Tombol TARE (X: 6 to 92, Y: 178 to 234)
-    if (tx >= 6 && tx <= 92 && ty >= 178 && ty <= 234) {
+    // Tombol TARE (X: 6 to 72, Y: 178 to 234)
+    if (tx >= 6 && tx <= 72 && ty >= 178 && ty <= 234) {
       clickBeep(15);
       sendTareCommandToNode2();
       liveBeratKg = 0.0;
@@ -1221,8 +1510,8 @@ void checkTouch() {
       return;
     }
 
-    // Tombol SIMPAN (X: 100 to 226, Y: 178 to 234)
-    if (tx >= 100 && tx <= 226 && ty >= 178 && ty <= 234) {
+    // Tombol SIMPAN (X: 76 to 178, Y: 178 to 234)
+    if (tx >= 76 && tx <= 178 && ty >= 178 && ty <= 234) {
       clickBeep(20);
       if (liveBeratKg <= 0.0 && liveTinggiCm <= 0.0 && !simTestActive) {
         snprintf(toastMsg, sizeof(toastMsg), "BELUM ADA DATA SENSOR BALITA!");
@@ -1235,8 +1524,16 @@ void checkTouch() {
       return;
     }
 
-    // Tombol Masuk ke Halaman TEST NODE (X: 234 to 314, Y: 178 to 234)
-    if (tx >= 234 && tx <= 314 && ty >= 178 && ty <= 234) {
+    // Tombol Masuk ke Halaman KALIBRASI (X: 182 to 248, Y: 178 to 234)
+    if (tx >= 182 && tx <= 248 && ty >= 178 && ty <= 234) {
+      clickBeep(12);
+      currentScreen = SCREEN_CALIBRATION;
+      needFullRedraw = true;
+      return;
+    }
+
+    // Tombol Masuk ke Halaman TEST NODE (X: 252 to 314, Y: 178 to 234)
+    if (tx >= 252 && tx <= 314 && ty >= 178 && ty <= 234) {
       clickBeep(12);
       currentScreen = SCREEN_TEST_NODE;
       needFullRedraw = true;
@@ -1361,7 +1658,88 @@ void checkTouch() {
   }
 
   // ----------------------------------------
-  // C. TOUCH: SCREEN_WIFI_SCAN
+  // C. TOUCH: SCREEN_CALIBRATION
+  // ----------------------------------------
+  else if (currentScreen == SCREEN_CALIBRATION) {
+    // Tombol < DASH (X: 6 to 66, Y: 2 to 32)
+    if (tx >= 6 && tx <= 66 && ty >= 2 && ty <= 32) {
+      clickBeep(10);
+      currentScreen = SCREEN_DASHBOARD;
+      needFullRedraw = true;
+      return;
+    }
+
+    // Tab 1: 1. BERAT (X: 170 to 242, Y: 2 to 32)
+    if (tx >= 170 && tx <= 242 && ty >= 2 && ty <= 32) {
+      if (calibTab != 0) {
+        clickBeep(10);
+        calibTab = 0;
+        needFullRedraw = true;
+      }
+      return;
+    }
+
+    // Tab 2: 2. TINGGI (X: 246 to 316, Y: 2 to 32)
+    if (tx >= 246 && tx <= 316 && ty >= 2 && ty <= 32) {
+      if (calibTab != 1) {
+        clickBeep(10);
+        calibTab = 1;
+        needFullRedraw = true;
+      }
+      return;
+    }
+
+    // Interaksi Khusus Tab 0: Timbangan
+    if (calibTab == 0) {
+      // Tombol TARE (X: 160 to 314, Y: 35 to 81)
+      if (tx >= 160 && tx <= 314 && ty >= 35 && ty <= 81) {
+        clickBeep(15);
+        sendTareCommandToNode2();
+        calibStatusMsg = "MENGIRIM PERINTAH TARE...";
+        calibStatusTime = millis() + 3000;
+        snprintf(toastMsg, sizeof(toastMsg), "MENGIRIM TARE KE TIMBANGAN...");
+        toastUntil = millis() + 2500;
+        return;
+      }
+
+      // Baris Tombol Stepper (Y: 104 to 138)
+      if (ty >= 104 && ty <= 138) {
+        if (tx >= 8 && tx <= 58)        { clickBeep(8); calibTargetKg -= 5.0f; }
+        else if (tx >= 59 && tx <= 109) { clickBeep(8); calibTargetKg -= 1.0f; }
+        else if (tx >= 110 && tx <= 160){ clickBeep(8); calibTargetKg -= 0.1f; }
+        else if (tx >= 161 && tx <= 211){ clickBeep(8); calibTargetKg += 0.1f; }
+        else if (tx >= 212 && tx <= 262){ clickBeep(8); calibTargetKg += 1.0f; }
+        else if (tx >= 263 && tx <= 314){ clickBeep(8); calibTargetKg += 5.0f; }
+        calibTargetKg = constrain(calibTargetKg, 0.1f, 150.0f);
+        return;
+      }
+
+      // Baris Tombol Preset (Y: 140 to 172)
+      if (ty >= 140 && ty <= 172) {
+        if (tx >= 8 && tx <= 58)        { clickBeep(10); calibTargetKg = 1.0f; }
+        else if (tx >= 59 && tx <= 109) { clickBeep(10); calibTargetKg = 5.0f; }
+        else if (tx >= 110 && tx <= 160){ clickBeep(10); calibTargetKg = 10.0f; }
+        else if (tx >= 161 && tx <= 211){ clickBeep(10); calibTargetKg = 20.0f; }
+        else if (tx >= 212 && tx <= 262){ clickBeep(10); calibTargetKg = 50.0f; }
+        else if (tx >= 263 && tx <= 314){ clickBeep(10); calibTargetKg = 60.0f; }
+        return;
+      }
+
+      // Tombol Eksekusi Kalibrasi Beban (X: 6 to 314, Y: 180 to 236)
+      if (tx >= 6 && tx <= 314 && ty >= 180 && ty <= 236) {
+        clickBeep(20);
+        sendCalibrateCommandToNode2(calibTargetKg);
+        calibStatusMsg = "MENGIRIM KALIBRASI...";
+        calibStatusTime = millis() + 4000;
+        snprintf(toastMsg, sizeof(toastMsg), "MENGIRIM KALIBRASI %.2f KG...", calibTargetKg);
+        toastUntil = millis() + 3000;
+        return;
+      }
+    }
+  }
+
+  // ----------------------------------------
+  // D. TOUCH: SCREEN_WIFI_SCAN
   // ----------------------------------------
   else if (currentScreen == SCREEN_WIFI_SCAN) {
     // Tombol MANUAL di Header (X: 125 to 192, Y: 2 to 28)
@@ -1695,7 +2073,19 @@ void setup() {
     Serial.println("[ERROR] Inisialisasi ESP-NOW Gagal!");
   } else {
     esp_now_register_recv_cb(OnDataRecv);
-    Serial.println("[OK] ESP-NOW Receiver Siap.");
+
+    esp_now_peer_info_t peerInfo;
+    memset(&peerInfo, 0, sizeof(peerInfo));
+    memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+    peerInfo.channel = WIFI_FIXED_CHANNEL;
+    peerInfo.encrypt = false;
+    if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+      Serial.println("[ERROR] Gagal Daftarkan Peer Broadcast!");
+    } else {
+      Serial.println("[OK] Peer Broadcast ESP-NOW Terdaftar di Channel 11.");
+    }
+
+    Serial.println("[OK] ESP-NOW Receiver & Transmitter Siap.");
   }
 
   drawDashboardScreen();
@@ -1733,6 +2123,8 @@ void loop() {
       drawDashboardScreen();
     } else if (currentScreen == SCREEN_TEST_NODE) {
       drawTestNodeScreen();
+    } else if (currentScreen == SCREEN_CALIBRATION) {
+      drawCalibrationScreen();
     }
     drawToastNotification();
   }

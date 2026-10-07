@@ -51,7 +51,8 @@ struct_msg_berat myData;
 // Paket Perintah Terima (CYD Hub -> Node 2)
 typedef struct struct_cmd_tare {
   int target_node;  // 2
-  int command;      // 1 = Tare
+  int command;      // 1 = Tare, 2 = Calibrate
+  float target_kg;  // Custom target weight (contoh: 57.4, 60.0, 19.0)
 } struct_cmd_tare;
 
 uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
@@ -75,16 +76,47 @@ unsigned long lastSendTime = 0;
 unsigned long lastSerialTime = 0;
 
 // ==========================================
-// 4. CALLBACK PENERIMA ESP-NOW (REMOTE TARE)
+// 4. CALLBACK PENERIMA ESP-NOW (REMOTE TARE & KALIBRASI)
 // ==========================================
 void OnDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *incomingData, int len) {
-  if (len == sizeof(struct_cmd_tare)) {
+  if (len >= 8) {
     struct_cmd_tare cmd;
-    memcpy(&cmd, incomingData, sizeof(cmd));
-    if (cmd.target_node == 2 && cmd.command == 1) {
-      Serial.println("\n[REMOTE COMMAND] Menerima instruksi TARE dari CYD Hub!");
-      scale.tare(15);
-      myData.status_kode = 1;
+    memset(&cmd, 0, sizeof(cmd));
+    memcpy(&cmd, incomingData, min((size_t)len, sizeof(cmd)));
+
+    if (cmd.target_node == 2) {
+      if (cmd.command == 1) { // TARE
+        Serial.println("\n[ESP-NOW WIRELESS] Menerima instruksi TARE dari CYD Hub!");
+        scale.tare(20);
+        currentWeightGrams = 0.0f;
+        currentWeightKg = 0.0f;
+        myData.status_kode = 1;
+        esp_now_send(broadcastAddress, (uint8_t *)&myData, sizeof(myData));
+        Serial.println("[ESP-NOW WIRELESS] TARE Berhasil dieksekusi!");
+      }
+      else if (cmd.command == 2) { // KALIBRASI BEBAN KUSTOM
+        float targetKg = cmd.target_kg;
+        if (targetKg < 0.5f || targetKg > 200.0f) targetKg = 57.4f;
+
+        Serial.printf("\n[ESP-NOW WIRELESS] Menerima instruksi KALIBRASI BEBAN: %.2f kg dari CYD Hub...\n", targetKg);
+        delay(300);
+        long raw_val = scale.get_value(25); // Ambil rata-rata 25 sampel presisi
+        float targetGrams = targetKg * 1000.0f;
+        cal_factor = (float)raw_val / targetGrams;
+
+        scale.set_scale(cal_factor);
+        preferences.putFloat("faktor", cal_factor);
+        currentWeightGrams = targetGrams;
+        currentWeightKg = targetKg;
+        myData.status_kode = 2; // Kode Kalibrasi Sukses
+
+        esp_now_send(broadcastAddress, (uint8_t *)&myData, sizeof(myData));
+
+        Serial.println("=====================================================");
+        Serial.printf("[ESP-NOW WIRELESS] KALIBRASI SUKSES! Faktor: %.4f\n", cal_factor);
+        Serial.printf("[ESP-NOW WIRELESS] Raw Delta: %ld untuk Beban %.2f kg\n", raw_val, targetKg);
+        Serial.println("=====================================================");
+      }
     }
   }
 }
