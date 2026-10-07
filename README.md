@@ -99,7 +99,7 @@ V4_CYD_FIREBASE/
 
 ### E. Fitur Khusus: Lab Simulator Node di CYD (Tanpa Sensor Fisik)
 Bagi Anda yang modul sensor fisiknya (Node 1, 2, 3) belum dirakit:
-1. Pada layar utama CYD, sentuh tombol kanan bawah **`[ TAB LAB TEST NODE > ]`**.
+1. Pada layar utama CYD, sentuh tombol kanan bawah **`[ TAB LAB TEST > ]`**.
 2. Anda akan masuk ke halaman **Simulator Interaktif**:
    * **Node 2 (Timbangan)**: Sentuh `[-1.0]`, `[-0.1]`, `[+0.1]`, `[+1.0]` untuk menaik-turunkan angka berat badan balita.
    * **Node 3 (Tinggi)**: Sentuh `[-5.0]`, `[-1.0]`, `[+1.0]`, `[+5.0]` untuk mengatur tinggi badan.
@@ -107,6 +107,19 @@ Bagi Anda yang modul sensor fisiknya (Node 1, 2, 3) belum dirakit:
    * **Tombol Aksi**: Sentuh **`[ PUSH TELEMETRI KE CLOUD RTDB ]`** atau **`[ SIMPAN BALITA KE PEMERIKSAAN ]`**.
 3. Buka Web Dashboard di laptop/HP, Anda akan melihat angka di web bergerak seketika secara real-time mengikuti sentuhan tangan Anda di CYD!
 4. Sentuh tombol **`< DASH`** di pojok kiri atas CYD untuk kembali ke layar utama.
+
+### F. Fitur Menu Kalibrasi di Layar CYD (100% Wireless ESP-NOW)
+Pada bilah bawah layar Dashboard CYD, sentuh tombol **`[ MENU KALIB > ]`**:
+1. **Tab `[ 1. BERAT ]` (Kalibrasi Timbangan Node 2)**:
+   * **Tombol TARE (Nol-kan)**: Menol-kan pembacaan saat timbangan kosong tanpa beban.
+   * **Target Beban Acuan Fleksibel**: Atur berat acuan kalibrasi menggunakan stepper `[-5]`, `[-1]`, `[-0.1]`, `[+0.1]`, `[+1]`, `[+5]` atau preset cepat `[1kg]`, `[5kg]`, `[10kg]`, `[20kg]`, `[50kg]`, `[60kg]`.
+   * **Tombol Kalibrasi Beban**: Mengirim instruksi nirkabel ke Node 2 untuk menghitung faktor kalibrasi presisi dan menyimpannya permanen di Flash NVS Node 2.
+2. **Tab `[ 2. TINGGI ]` (Kalibrasi Tiang 2.0 Meter Node 3)**:
+   * **Acuan Tiang Otomatis 200.0 cm (2.0 Meter)**: Saat tiang kosong pas 2.0 meter dari lantai, tinggi balita di CYD terbaca `0.0 cm`.
+   * **Visual Adjuster Banner Real-Time**:
+     * 🟢 **`PAS 2.0 METER (OK)`**: Tiang tepat 200 cm, posisi akurat.
+     * 🟡 **`KURANG X.X CM`**: Jarak sensor kurang, muncul instruksi *"NAIKKAN TIANG / SENSOR KE ATAS"*.
+     * 🔴 **`LEBIH +X.X CM`**: Jarak sensor berlebih, muncul instruksi *"TURUNKAN TIANG / SENSOR KE BAWAH"*.
 
 ---
 
