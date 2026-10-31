@@ -13,6 +13,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
   <script>
     tailwind.config = {
@@ -105,14 +106,24 @@
         <span id="soundIcon">🔔</span> Suara: <span id="soundStatus" class="text-brand-green font-bold">ON</span>
       </button>
 
-      <!-- Cetak PDF Lengkap + Foto -->
-      <button onclick="cetakLaporanPdf()" class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white shadow-lg shadow-blue-900/30 transition-all">
-        🖨️ Cetak PDF + Foto
+      <!-- Unduh Excel (+ Foto Otomatis) -->
+      <button onclick="exportExcelHtml()" class="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg shadow-emerald-900/30 transition-all" title="Unduh Spreadsheet Excel (.XLS) dengan foto otomatis muncul di dalam baris">
+        📊 Excel (.XLS) + Foto
       </button>
 
-      <!-- Ekspor CSV -->
-      <button onclick="exportKmsCsv()" class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg shadow-emerald-900/30 transition-all">
-        📥 Unduh CSV
+      <!-- Unduh Paket ZIP (CSV + Folder Foto) -->
+      <button onclick="exportZipPackage()" class="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white shadow-lg shadow-amber-900/30 transition-all" title="Unduh Arsip ZIP: CSV berurutan + Folder file foto JPG balita">
+        📦 ZIP (CSV + Foto)
+      </button>
+
+      <!-- Cetak PDF Lengkap + Foto -->
+      <button onclick="cetakLaporanPdf()" class="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white shadow-lg shadow-blue-900/30 transition-all">
+        🖨️ Cetak PDF
+      </button>
+
+      <!-- Ekspor CSV Standar -->
+      <button onclick="exportKmsCsv()" class="flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-semibold glass-card text-slate-300 hover:text-white hover:border-brand-cyan transition-all" title="Unduh format teks CSV standar">
+        📥 CSV
       </button>
     </div>
   </header>
@@ -425,12 +436,18 @@
         <p class="text-xs text-brand-muted mt-0.5">Database pemeriksaan realtime Posyandu dari ESP32 CYD & Web</p>
       </div>
 
-      <!-- Pencarian Balita & Aksi Cetak -->
+      <!-- Pencarian Balita & Aksi Ekspor Lengkap -->
       <div class="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-        <input type="text" id="searchTable" onkeyup="filterRiwayatTable()" placeholder="Cari Nama / NIK..." class="px-3.5 py-1.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-xs focus:border-brand-cyan focus:outline-none w-full sm:w-48">
+        <input type="text" id="searchTable" onkeyup="filterRiwayatTable()" placeholder="Cari Nama / NIK..." class="px-3.5 py-1.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-xs focus:border-brand-cyan focus:outline-none w-full sm:w-40">
         <span id="totalDataCount" class="text-xs font-mono font-bold text-cyan-400 bg-cyan-500/10 px-2.5 py-1.5 rounded-xl border border-cyan-500/30 whitespace-nowrap">0 Data</span>
-        <button onclick="cetakLaporanPdf()" class="px-3 py-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white text-xs font-bold transition-all flex items-center gap-1 shadow-md shadow-cyan-900/20 whitespace-nowrap">
-          🖨️ Cetak PDF + Foto
+        <button onclick="exportExcelHtml()" class="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all flex items-center gap-1 shadow-sm whitespace-nowrap" title="Unduh Spreadsheet Excel dengan foto di baris">
+          📊 Excel+Foto
+        </button>
+        <button onclick="exportZipPackage()" class="px-2.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-all flex items-center gap-1 shadow-sm whitespace-nowrap" title="Unduh ZIP berisi file CSV terurut + Folder seluruh file Foto JPG balita">
+          📦 ZIP Paket
+        </button>
+        <button onclick="cetakLaporanPdf()" class="px-2.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all flex items-center gap-1 shadow-sm whitespace-nowrap">
+          🖨️ PDF
         </button>
       </div>
     </div>
@@ -1632,7 +1649,7 @@
         `;
       }).join("");
 
-      win.document.write(\`
+      win.document.write(`
         <!DOCTYPE html>
         <html lang="id">
         <head>
@@ -1666,8 +1683,8 @@
               <p style="font-size: 12px; color: #64748b; margin-top: 3px;">Laporan Rekapitulasi Antropometri Balita, Deteksi Stunting (Kemenkes/WHO) & Dokumentasi Foto</p>
             </div>
             <div style="text-align: right; font-size: 11px; color: #64748b; line-height: 1.5;">
-              Tanggal Cetak: <b>\${new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })}</b><br>
-              Total Balita: <b style="color: #0284c7;">\${riwayatDataList.length} Anak</b>
+              Tanggal Cetak: <b>${new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })}</b><br>
+              Total Balita: <b style="color: #0284c7;">${riwayatDataList.length} Anak</b>
             </div>
           </div>
           <table>
@@ -1687,7 +1704,7 @@
               </tr>
             </thead>
             <tbody>
-              \${rowsHtml}
+              ${rowsHtml}
             </tbody>
           </table>
           <div style="margin-top: 35px; display: flex; justify-content: flex-end; page-break-inside: avoid;">
@@ -1698,8 +1715,173 @@
           </div>
         </body>
         </html>
-      \`);
+      `);
       win.document.close();
+    }
+
+    // ----------------------------------------------------------
+    // H3. EKSPOR EXCEL SPREADSHEET DENGAN FOTO BALITA (.XLS)
+    // ----------------------------------------------------------
+    function exportExcelHtml() {
+      if (!riwayatDataList || riwayatDataList.length === 0) {
+        alert("Belum ada data pemeriksaan untuk diekspor ke Excel!");
+        return;
+      }
+
+      const rows = riwayatDataList.map((r, idx) => {
+        const d = r.timestamp ? new Date(r.timestamp).toLocaleDateString("id-ID", { day: '2-digit', month: 'short', year: 'numeric' }) : "-";
+        const fotoImg = r.foto_balita
+          ? `<img src="${r.foto_balita}" width="65" height="65" style="border-radius: 6px; object-fit: cover;">`
+          : 'Tidak ada foto';
+
+        return `
+          <tr style="height: 70px;">
+            <td align="center">${idx + 1}</td>
+            <td align="center" style="width: 75px;">${fotoImg}</td>
+            <td><b>${escapeHtml(r.nama_balita || '-')}</b></td>
+            <td style="mso-number-format:'\\@';">${escapeHtml(r.nik_id || '-')}</td>
+            <td align="center">${r.usia_bulan || 0} bln (${r.gender || 'L'})</td>
+            <td align="center"><b>${(r.berat_kg || 0).toFixed(2)}</b></td>
+            <td align="center"><b>${(r.tinggi_cm || 0).toFixed(1)}</b></td>
+            <td align="center">${r.imt ? r.imt.toFixed(1) : '-'}</td>
+            <td align="center">${r.suhu ? r.suhu.toFixed(1) : '-'}</td>
+            <td align="center">${r.bpm || 0} / ${r.spo2 || 0}%</td>
+            <td align="center">${escapeHtml(r.status_stunting || 'Normal')}</td>
+            <td align="center">${escapeHtml(r.status_gizi || 'Gizi Baik')}</td>
+            <td>${escapeHtml(r.nama_orangtua || '-')}</td>
+            <td align="center">${d}</td>
+          </tr>
+        `;
+      }).join("");
+
+      const excelHtml = `
+        <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+        <head>
+          <meta charset="utf-8">
+          <!--[if gte mso 9]>
+          <xml>
+            <x:ExcelWorkbook>
+              <x:ExcelWorksheets>
+                <x:ExcelWorksheet>
+                  <x:Name>Rekap KMS Balita</x:Name>
+                  <x:WorksheetOptions>
+                    <x:DisplayGridlines/>
+                  </x:WorksheetOptions>
+                </x:ExcelWorksheet>
+              </x:ExcelWorksheets>
+            </x:ExcelWorkbook>
+          </xml>
+          <![endif]-->
+          <style>
+            table { border-collapse: collapse; width: 100%; font-family: Arial, sans-serif; font-size: 11px; }
+            th { background-color: #0284c7; color: #ffffff; font-weight: bold; border: 1px solid #64748b; padding: 8px; text-align: center; }
+            td { border: 1px solid #cbd5e1; padding: 6px; vertical-align: middle; }
+          </style>
+        </head>
+        <body>
+          <h2>REKAPITULASI PEMERIKSAAN POSYANDU PINTAR IoT & FOTO DOKUMENTASI</h2>
+          <p>Tanggal Ekspor: ${new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })} | Total: ${riwayatDataList.length} Balita</p>
+          <table border="1">
+            <thead>
+              <tr>
+                <th width="35">No</th>
+                <th width="80">Foto Balita</th>
+                <th width="160">Nama Balita</th>
+                <th width="130">NIK / ID KMS</th>
+                <th width="80">Usia/JK</th>
+                <th width="70">Berat (kg)</th>
+                <th width="70">Tinggi (cm)</th>
+                <th width="50">IMT</th>
+                <th width="60">Suhu (°C)</th>
+                <th width="80">BPM / SpO2</th>
+                <th width="110">Status Stunting</th>
+                <th width="100">Status Gizi</th>
+                <th width="140">Nama Orang Tua</th>
+                <th width="90">Waktu</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows}
+            </tbody>
+          </table>
+        </body>
+        </html>
+      `;
+
+      const blob = new Blob([excelHtml], { type: "application/vnd.ms-excel;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `REKAP_KMS_BALITA_FOTO_${new Date().toISOString().slice(0, 10)}.xls`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    // ----------------------------------------------------------
+    // H4. EKSPOR PAKET ZIP (CSV TERURUT + FOLDER FOTO JPG)
+    // ----------------------------------------------------------
+    async function exportZipPackage() {
+      if (!riwayatDataList || riwayatDataList.length === 0) {
+        alert("Belum ada data pemeriksaan untuk diekspor!");
+        return;
+      }
+
+      if (typeof JSZip === "undefined") {
+        alert("Pustaka ZIP sedang dimuat, silakan coba beberapa detik lagi.");
+        return;
+      }
+
+      const zip = new JSZip();
+      const folderFoto = zip.folder("FOTO_BALITA");
+
+      let csvContent = "No,Nama Balita,NIK,File Foto Balita,Usia (Bulan),Jenis Kelamin,Berat (kg),Tinggi (cm),IMT,Suhu (C),BPM,SpO2 (%),Status Stunting,Status Gizi,Nama Orang Tua,Waktu Pemeriksaan\n";
+
+      riwayatDataList.forEach((r, idx) => {
+        const noUrut = String(idx + 1).padStart(2, '0');
+        const cleanNama = (r.nama_balita || 'Balita').replace(/[^a-zA-Z0-9]/g, '_');
+        const cleanNik = (r.nik_id && r.nik_id !== '-') ? r.nik_id.replace(/[^a-zA-Z0-9]/g, '') : 'NONIK';
+        const photoFileName = `${noUrut}_${cleanNama}_${cleanNik}.jpg`;
+
+        let fotoCellCsv = "Tidak Ada Foto";
+        if (r.foto_balita && r.foto_balita.startsWith("data:image")) {
+          fotoCellCsv = `FOTO_BALITA/${photoFileName}`;
+          const parts = r.foto_balita.split(',');
+          const base64Data = parts[1] || parts[0];
+          if (base64Data) {
+            folderFoto.file(photoFileName, base64Data, { base64: true });
+          }
+        }
+
+        const d = r.timestamp ? new Date(r.timestamp).toISOString() : "";
+        csvContent += `${idx + 1},"${r.nama_balita || ''}","${r.nik_id || ''}","${fotoCellCsv}",${r.usia_bulan || 0},"${r.gender || 'L'}",${r.berat_kg || 0},${r.tinggi_cm || 0},${r.imt || 0},${r.suhu || 0},${r.bpm || 0},${r.spo2 || 0},"${r.status_stunting || ''}","${r.status_gizi || ''}","${r.nama_orangtua || ''}","${d}"\n`;
+      });
+
+      // Tambahkan file CSV ke dalam ZIP
+      zip.file("REKAP_DATA_KMS.csv", csvContent);
+
+      // Tambahkan petunjuk README
+      const readme = `ARSIP REKAPITULASI POSYANDU PINTAR IoT
+Tanggal Unduh: ${new Date().toLocaleString('id-ID')}
+Total Data: ${riwayatDataList.length} Balita
+
+ISI PAKET ZIP INI:
+1. REKAP_DATA_KMS.csv: Data rekap tabel lengkap untuk Microsoft Excel, Google Sheets, atau WPS Office.
+   -> Kolom 'File Foto Balita' telah diurutkan persis sesuai dengan nama file foto di dalam folder FOTO_BALITA/.
+2. Folder FOTO_BALITA/: Berisi seluruh file foto asli (.JPG) beresolusi tajam yang dinamai rapi: [NoUrut]_[NamaBalita]_[NIK].jpg.
+`;
+      zip.file("README_PETUNJUK.txt", readme);
+
+      try {
+        const content = await zip.generateAsync({ type: "blob" });
+        const url = URL.createObjectURL(content);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `PAKET_REKAP_KMS_FOTO_${new Date().toISOString().slice(0, 10)}.zip`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        alert("Gagal membuat file ZIP: " + e.message);
+      }
     }
 
     // ----------------------------------------------------------
