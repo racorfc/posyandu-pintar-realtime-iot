@@ -310,6 +310,49 @@
           <input type="text" id="inIbu" placeholder="Contoh: Ny. Siti Rahmawati" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm focus:border-brand-cyan focus:outline-none transition-all">
         </div>
 
+        <!-- Foto Dokumentasi Balita / Pasien (Kamera Laptop & HP) -->
+        <div class="md:col-span-2 p-3.5 rounded-xl bg-slate-900/60 border border-brand-border">
+          <div class="flex items-center justify-between mb-2">
+            <label class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+              📷 <span>Foto Balita (Kamera Laptop & HP)</span>
+            </label>
+            <span id="fotoStatusBadge" class="text-[10px] font-mono text-slate-400 bg-slate-800 px-2 py-0.5 rounded">Belum ada foto</span>
+          </div>
+
+          <div class="flex flex-col sm:flex-row items-center gap-3.5">
+            <!-- Box Preview Foto -->
+            <div id="fotoPreviewContainer" class="w-24 h-24 sm:w-28 sm:h-28 rounded-xl border-2 border-dashed border-slate-700 bg-slate-950/70 flex flex-col items-center justify-center overflow-hidden relative group shrink-0">
+              <div id="fotoPlaceholder" class="flex flex-col items-center justify-center text-slate-500 p-2 text-center">
+                <span class="text-2xl">👶</span>
+                <span class="text-[9px] mt-1 font-medium leading-tight">Tidak ada foto</span>
+              </div>
+              <img id="imgPreviewFoto" src="" alt="Preview Foto Balita" class="hidden w-full h-full object-cover">
+              <button type="button" id="btnHapusFoto" onclick="hapusFotoBalita()" title="Hapus Foto" class="hidden absolute top-1 right-1 p-1 rounded-full bg-rose-600/90 hover:bg-rose-500 text-white shadow transition-all text-xs">
+                ✕
+              </button>
+            </div>
+
+            <!-- Tombol Aksi Kamera -->
+            <div class="flex-1 w-full flex flex-col gap-2">
+              <div class="flex flex-wrap gap-2">
+                <!-- Tombol 1: Buka Kamera Live WebRTC (Laptop Webcam / Kamera Depan-Belakang HP) -->
+                <button type="button" onclick="bukaModalKamera()" class="flex-1 min-w-[140px] py-2.5 px-3 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md shadow-cyan-900/20">
+                  📸 <span>Buka Kamera Live</span>
+                </button>
+
+                <!-- Tombol 2: Jepret Kamera Bawaan HP / File Picker -->
+                <label class="flex-1 min-w-[140px] py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-brand-cyan text-slate-200 hover:text-white text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center">
+                  📱 <span>Kamera Bawaan HP</span>
+                  <input type="file" id="nativeCameraInput" accept="image/*" capture="environment" onchange="handleNativeCameraUpload(event)" class="hidden">
+                </label>
+              </div>
+              <p class="text-[11px] text-brand-muted leading-relaxed">
+                💡 <b>Otomatis mendeteksi perangkat:</b> Menggunakan webcam laptop di PC/Laptop, atau kamera belakang/depan di HP/Smartphone.
+              </p>
+            </div>
+          </div>
+        </div>
+
         <!-- Tombol Aksi Simpan -->
         <div class="md:col-span-2 pt-2 flex flex-col sm:flex-row gap-3">
           <button type="submit" class="flex-1 py-3.5 px-6 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 font-extrabold text-sm shadow-lg shadow-cyan-500/20 transition-all flex items-center justify-center gap-2">
@@ -390,6 +433,7 @@
         <thead>
           <tr class="border-b border-brand-border text-brand-muted uppercase font-bold tracking-wider">
             <th class="py-3 px-3">Waktu</th>
+            <th class="py-3 px-3 text-center">Foto</th>
             <th class="py-3 px-3">Nama Balita</th>
             <th class="py-3 px-3">Usia/JK</th>
             <th class="py-3 px-3">Berat</th>
@@ -404,7 +448,7 @@
         </thead>
         <tbody id="tableRiwayatBody" class="divide-y divide-brand-border/60 font-medium text-slate-300">
           <tr>
-            <td colspan="11" class="py-8 text-center text-brand-muted">
+            <td colspan="12" class="py-8 text-center text-brand-muted">
               Memuat data pemeriksaan dari Firebase RTDB...
             </td>
           </tr>
@@ -504,6 +548,27 @@
           </div>
         </div>
 
+        <!-- Foto di Modal Edit -->
+        <div class="flex items-center gap-3.5 p-3 rounded-xl bg-slate-900/60 border border-brand-border">
+          <div class="w-16 h-16 rounded-xl border border-slate-700 bg-slate-950 flex items-center justify-center overflow-hidden shrink-0">
+            <img id="editFotoImg" src="" alt="Foto Balita" class="hidden w-full h-full object-cover">
+            <span id="editFotoPlaceholder" class="text-2xl text-slate-500">👤</span>
+          </div>
+          <div class="flex-1">
+            <div class="text-xs font-bold text-slate-300">Foto Balita</div>
+            <div class="text-[11px] text-brand-muted mt-0.5" id="editFotoStatus">Tidak ada foto tersimpan</div>
+            <div class="flex gap-2 mt-2">
+              <label class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-bold border border-cyan-500/30 cursor-pointer">
+                📷 Ganti Foto
+                <input type="file" accept="image/*" capture="environment" onchange="handleEditPhotoUpload(event)" class="hidden">
+              </label>
+              <button type="button" id="btnHapusFotoEdit" onclick="hapusFotoEditModal()" class="hidden px-2 py-1 rounded-lg bg-rose-500/20 text-rose-300 text-xs font-bold border border-rose-500/30">
+                Hapus
+              </button>
+            </div>
+          </div>
+        </div>
+
         <!-- Nilai Fisik & Sensor -->
         <div class="p-3.5 rounded-xl bg-slate-900/60 border border-brand-border space-y-3">
           <div class="text-[11px] font-bold text-cyan-400 uppercase tracking-wider flex items-center justify-between">
@@ -559,6 +624,90 @@
           </button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- 6C. MODAL KAMERA LIVE (WEBCAM LAPTOP / KAMERA HP) -->
+  <!-- ======================================================== -->
+  <div id="modalKameraLive" class="fixed inset-0 bg-black/85 backdrop-blur-md z-50 hidden flex items-center justify-center p-3 sm:p-4">
+    <div class="glass-card rounded-2xl max-w-lg w-full p-4 sm:p-5 border-cyan-500/40 shadow-2xl shadow-cyan-500/20 relative flex flex-col">
+      <div class="flex items-center justify-between pb-3 mb-3 border-b border-brand-border">
+        <div class="flex items-center gap-2">
+          <span class="text-xl">📸</span>
+          <h3 class="text-sm sm:text-base font-bold text-white">
+            Kamera Posyandu Pintar
+          </h3>
+          <span id="camDeviceBadge" class="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">Auto Detect</span>
+        </div>
+        <button onclick="tutupModalKamera()" class="text-slate-400 hover:text-white text-2xl leading-none">&times;</button>
+      </div>
+
+      <!-- Pesan Error jika Kamera Ditolak / Tidak Tersedia -->
+      <div id="cameraErrorMessage" class="hidden mb-3 p-3 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-300 text-xs">
+        <span class="font-bold">⚠️ Akses Kamera:</span> <span id="cameraErrorText"></span>
+        <div class="mt-1 text-slate-300">Tips: Pastikan browser diberi izin kamera, atau gunakan tombol <b>"Kamera Bawaan HP"</b> di formulir.</div>
+      </div>
+
+      <!-- Video Stream Viewfinder -->
+      <div class="relative w-full aspect-[4/3] bg-black rounded-xl overflow-hidden border border-slate-700 flex items-center justify-center shadow-inner">
+        <video id="videoKamera" autoplay playsinline class="w-full h-full object-cover"></video>
+        
+        <!-- Frame Antropometri Balita -->
+        <div class="absolute inset-4 border border-cyan-400/30 rounded-lg pointer-events-none flex items-center justify-center">
+          <div class="w-10 h-10 border-t-2 border-l-2 border-cyan-400 absolute top-0 left-0"></div>
+          <div class="w-10 h-10 border-t-2 border-r-2 border-cyan-400 absolute top-0 right-0"></div>
+          <div class="w-10 h-10 border-b-2 border-l-2 border-cyan-400 absolute bottom-0 left-0"></div>
+          <div class="w-10 h-10 border-b-2 border-r-2 border-cyan-400 absolute bottom-0 right-0"></div>
+          <span class="text-[11px] font-mono text-cyan-400/80 bg-black/50 px-2 py-0.5 rounded">Fokuskan Balita / Pasien</span>
+        </div>
+      </div>
+
+      <!-- Tombol Kontrol Kamera -->
+      <div class="flex items-center justify-between gap-2.5 mt-3 pt-2">
+        <!-- Tombol Putar Kamera (Depan / Belakang untuk HP) -->
+        <button type="button" onclick="toggleSwitchCamera()" title="Putar Kamera Depan/Belakang" class="px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition-all flex items-center gap-1.5">
+          🔄 <span class="hidden sm:inline">Putar Kamera</span>
+        </button>
+
+        <!-- Tombol Jepret Utama -->
+        <button type="button" onclick="jepretFotoKamera()" class="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-black text-xs sm:text-sm shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2">
+          📸 <span>JEPRET FOTO</span>
+        </button>
+
+        <!-- Batal -->
+        <button type="button" onclick="tutupModalKamera()" class="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold">
+          Batal
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- 6D. MODAL LIHAT DETAIL FOTO BALITA (ZOOM / LIGHTBOX) -->
+  <!-- ======================================================== -->
+  <div id="modalLihatFoto" class="fixed inset-0 bg-black/90 backdrop-blur-md z-50 hidden flex items-center justify-center p-4">
+    <div class="glass-card rounded-2xl max-w-md w-full p-5 border-cyan-500/40 shadow-2xl relative flex flex-col">
+      <div class="flex items-center justify-between pb-3 mb-3 border-b border-brand-border">
+        <div>
+          <h3 id="lihatFotoNama" class="text-sm font-bold text-white">Foto Balita</h3>
+          <p id="lihatFotoDetail" class="text-[11px] text-brand-muted mt-0.5"></p>
+        </div>
+        <button onclick="tutupModalLihatFoto()" class="text-slate-400 hover:text-white text-2xl leading-none">&times;</button>
+      </div>
+
+      <div class="w-full aspect-square bg-black rounded-xl overflow-hidden border border-slate-700 flex items-center justify-center shadow-inner">
+        <img id="lihatFotoImg" src="" alt="Foto Balita" class="w-full h-full object-contain">
+      </div>
+
+      <div class="flex justify-between items-center gap-2 mt-4">
+        <a id="btnDownloadFoto" href="" download="foto_balita.jpg" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-bold border border-cyan-500/30 flex items-center gap-1.5">
+          💾 <span>Unduh Foto</span>
+        </a>
+        <button type="button" onclick="tutupModalLihatFoto()" class="px-4 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold">
+          Tutup
+        </button>
+      </div>
     </div>
   </div>
 
@@ -924,6 +1073,275 @@
       return { stuntingStatus: res.stuntingStatus, giziStatus: res.giziStatus };
     }
 
+    // ==========================================================
+    // D2. SISTEM KAMERA & FOTO BALITA (LAPTOP WEBCAM & KAMERA HP)
+    // ==========================================================
+    let currentFotoBalitaBase64 = null;
+    let currentEditFotoBase64 = null;
+    let cameraStream = null;
+    let currentFacingMode = "environment"; // default kamera belakang di HP, fallback otomatis ke laptop webcam
+
+    // 1. Buka Modal Kamera Live
+    async function bukaModalKamera() {
+      const modal = document.getElementById("modalKameraLive");
+      modal.classList.remove("hidden");
+      await startCameraStream();
+    }
+
+    // 2. Tutup Modal Kamera Live
+    function tutupModalKamera() {
+      stopCameraStream();
+      const modal = document.getElementById("modalKameraLive");
+      modal.classList.add("hidden");
+    }
+
+    // 3. Menjalankan Stream Kamera (Otomatis deteksi laptop / HP)
+    async function startCameraStream() {
+      stopCameraStream();
+      const video = document.getElementById("videoKamera");
+      const errBox = document.getElementById("cameraErrorMessage");
+      const errText = document.getElementById("cameraErrorText");
+      const badge = document.getElementById("camDeviceBadge");
+      errBox.classList.add("hidden");
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        errBox.classList.remove("hidden");
+        errText.innerText = "Browser Anda tidak mendukung WebRTC Camera. Gunakan tombol 'Kamera Bawaan HP'.";
+        badge.innerText = "Tidak Didukung";
+        return;
+      }
+
+      // Deteksi laptop vs HP
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      badge.innerText = isMobile ? (currentFacingMode === 'environment' ? 'HP: Belakang' : 'HP: Depan') : 'Laptop / PC Webcam';
+
+      // Coba akses kamera
+      try {
+        const constraints = {
+          video: {
+            facingMode: isMobile ? { ideal: currentFacingMode } : true,
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        };
+        cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = cameraStream;
+        await video.play();
+      } catch (err) {
+        console.warn("Gagal dengan facingMode, mencoba default video: true...", err);
+        try {
+          cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          video.srcObject = cameraStream;
+          await video.play();
+          badge.innerText = "Webcam Default";
+        } catch (fallbackErr) {
+          console.error("Gagal membuka kamera:", fallbackErr);
+          errBox.classList.remove("hidden");
+          errText.innerText = (fallbackErr.name === "NotAllowedError" || fallbackErr.name === "PermissionDeniedError")
+            ? "Izin akses kamera ditolak. Izinkan akses kamera pada pengaturan browser."
+            : "Kamera tidak terdeteksi atau sedang dipakai aplikasi lain (" + (fallbackErr.message || fallbackErr.name) + ").";
+          badge.innerText = "Akses Gagal";
+        }
+      }
+    }
+
+    // 4. Hentikan Stream Kamera
+    function stopCameraStream() {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+        cameraStream = null;
+      }
+      const video = document.getElementById("videoKamera");
+      if (video) video.srcObject = null;
+    }
+
+    // 5. Putar Kamera Depan / Belakang (Khusus HP / multi-kamera)
+    function toggleSwitchCamera() {
+      currentFacingMode = (currentFacingMode === "environment") ? "user" : "environment";
+      startCameraStream();
+    }
+
+    // 6. Jepret Foto dari Video Viewfinder
+    function jepretFotoKamera() {
+      const video = document.getElementById("videoKamera");
+      if (!video || !video.videoWidth) {
+        alert("Kamera belum siap, tunggu sebentar!");
+        return;
+      }
+
+      const canvas = document.createElement("canvas");
+      let w = video.videoWidth;
+      let h = video.videoHeight;
+      const maxDim = 500; // Ukuran optimal untuk Firebase RTDB (~30-50 KB)
+      if (w > maxDim || h > maxDim) {
+        if (w > h) {
+          h = Math.round((h * maxDim) / w);
+          w = maxDim;
+        } else {
+          w = Math.round((w * maxDim) / h);
+          h = maxDim;
+        }
+      }
+      canvas.width = w;
+      canvas.height = h;
+
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, w, h);
+
+      const base64Data = canvas.toDataURL("image/jpeg", 0.75);
+      setFotoBalita(base64Data);
+      tutupModalKamera();
+      playBeep(900, 150);
+    }
+
+    // 7. Handle Upload dari Kamera Bawaan HP / File Picker
+    function handleNativeCameraUpload(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const img = new Image();
+        img.onload = function() {
+          const canvas = document.createElement("canvas");
+          let w = img.width;
+          let h = img.height;
+          const maxDim = 500;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, w, h);
+
+          const base64Data = canvas.toDataURL("image/jpeg", 0.75);
+          setFotoBalita(base64Data);
+          playBeep(850, 120);
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+      event.target.value = "";
+    }
+
+    // 8. Atur & Tampilkan Foto di Form Utama
+    function setFotoBalita(base64) {
+      currentFotoBalitaBase64 = base64;
+      const img = document.getElementById("imgPreviewFoto");
+      const ph = document.getElementById("fotoPlaceholder");
+      const btnHapus = document.getElementById("btnHapusFoto");
+      const badge = document.getElementById("fotoStatusBadge");
+      const container = document.getElementById("fotoPreviewContainer");
+
+      if (base64) {
+        img.src = base64;
+        img.classList.remove("hidden");
+        ph.classList.add("hidden");
+        btnHapus.classList.remove("hidden");
+        badge.innerText = "Foto Siap";
+        badge.className = "text-[10px] font-mono text-emerald-300 bg-emerald-500/20 border border-emerald-500/40 px-2 py-0.5 rounded font-bold";
+        container.className = "w-24 h-24 sm:w-28 sm:h-28 rounded-xl border-2 border-emerald-500/60 bg-slate-950 flex flex-col items-center justify-center overflow-hidden relative group shrink-0 shadow-lg shadow-emerald-500/10";
+      } else {
+        img.src = "";
+        img.classList.add("hidden");
+        ph.classList.remove("hidden");
+        btnHapus.classList.add("hidden");
+        badge.innerText = "Belum ada foto";
+        badge.className = "text-[10px] font-mono text-slate-400 bg-slate-800 px-2 py-0.5 rounded";
+        container.className = "w-24 h-24 sm:w-28 sm:h-28 rounded-xl border-2 border-dashed border-slate-700 bg-slate-950/70 flex flex-col items-center justify-center overflow-hidden relative group shrink-0";
+      }
+    }
+
+    function hapusFotoBalita() {
+      setFotoBalita(null);
+    }
+
+    // 9. Modal Zoom / Lightbox Foto
+    function bukaModalLihatFoto(fotoUrl, nama, usia, bb, tb) {
+      document.getElementById("lihatFotoImg").src = fotoUrl;
+      document.getElementById("lihatFotoNama").innerText = "Foto: " + nama;
+      document.getElementById("lihatFotoDetail").innerText = `${usia} | Berat: ${bb} | Tinggi: ${tb}`;
+      document.getElementById("btnDownloadFoto").href = fotoUrl;
+      document.getElementById("btnDownloadFoto").download = `foto_${nama.replace(/[^a-zA-Z0-9]/g, '_')}.jpg`;
+      document.getElementById("modalLihatFoto").classList.remove("hidden");
+    }
+
+    function tutupModalLihatFoto() {
+      document.getElementById("modalLihatFoto").classList.add("hidden");
+    }
+
+    // 10. Manajemen Foto di Modal Edit Typo
+    function setEditFoto(base64) {
+      currentEditFotoBase64 = base64;
+      const img = document.getElementById("editFotoImg");
+      const ph = document.getElementById("editFotoPlaceholder");
+      const status = document.getElementById("editFotoStatus");
+      const btnHapus = document.getElementById("btnHapusFotoEdit");
+
+      if (base64) {
+        img.src = base64;
+        img.classList.remove("hidden");
+        ph.classList.add("hidden");
+        btnHapus.classList.remove("hidden");
+        status.innerText = "Foto tersedia";
+        status.className = "text-[11px] text-emerald-400 font-bold mt-0.5";
+      } else {
+        img.src = "";
+        img.classList.add("hidden");
+        ph.classList.remove("hidden");
+        btnHapus.classList.add("hidden");
+        status.innerText = "Tidak ada foto tersimpan";
+        status.className = "text-[11px] text-brand-muted mt-0.5";
+      }
+    }
+
+    function handleEditPhotoUpload(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const img = new Image();
+        img.onload = function() {
+          const canvas = document.createElement("canvas");
+          let w = img.width;
+          let h = img.height;
+          const maxDim = 500;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, w, h);
+
+          const base64Data = canvas.toDataURL("image/jpeg", 0.75);
+          setEditFoto(base64Data);
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+      event.target.value = "";
+    }
+
+    function hapusFotoEditModal() {
+      setEditFoto(null);
+    }
+
     // ----------------------------------------------------------
     // E. SIMPAN PEMERIKSAAN KE FIREBASE (/posyandu/pemeriksaan)
     // ----------------------------------------------------------
@@ -954,6 +1372,7 @@
         usia_bulan: usia,
         gender: gender,
         nama_orangtua: ibu || "-",
+        foto_balita: currentFotoBalitaBase64 || null,
         berat_kg: parseFloat((liveData.berat || 0).toFixed(2)),
         tinggi_cm: parseFloat((liveData.tinggi || 0).toFixed(1)),
         imt: imt,
@@ -975,9 +1394,10 @@
         setTimeout(() => playBeep(1200, 200), 180);
         alert("✅ Pemeriksaan balita [" + nama + "] berhasil disimpan ke Cloud!");
 
-        // Reset form
+        // Reset form & foto
         document.getElementById("inNama").value = "";
         document.getElementById("inNik").value = "";
+        hapusFotoBalita();
       }).catch((err) => {
         alert("❌ Gagal menyimpan data: " + err.message);
       });
@@ -1004,7 +1424,7 @@
     function renderTable(dataArray) {
       const tbody = document.getElementById("tableRiwayatBody");
       if (dataArray.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="11" class="py-8 text-center text-brand-muted">Belum ada data pemeriksaan tersimpan.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="12" class="py-8 text-center text-brand-muted">Belum ada data pemeriksaan tersimpan.</td></tr>`;
         return;
       }
 
@@ -1039,9 +1459,23 @@
           `;
         }
 
+        // Tampilan Thumbnail Foto Balita
+        let fotoBalitaHtml = `
+          <div class="w-9 h-9 mx-auto rounded-xl bg-slate-800/80 border border-brand-border text-slate-500 flex items-center justify-center text-sm shadow-inner" title="Tidak ada foto">
+            👤
+          </div>
+        `;
+        if (row.foto_balita) {
+          const escapedNama = escapeHtml(row.nama_balita || 'Balita').replace(/'/g, "\\'");
+          fotoBalitaHtml = `
+            <img src="${row.foto_balita}" onclick="bukaModalLihatFoto('${row.foto_balita}', '${escapedNama}', '${row.usia_bulan || 0} bln (${row.gender || 'L'})', '${(row.berat_kg || 0).toFixed(2)} kg', '${(row.tinggi_cm || 0).toFixed(1)} cm')" class="w-9 h-9 mx-auto rounded-xl object-cover border border-cyan-500/50 cursor-pointer hover:scale-110 hover:border-cyan-400 transition-all shadow-md shadow-cyan-500/20" alt="Foto ${escapedNama}" title="Klik untuk memperbesar foto">
+          `;
+        }
+
         return `
           <tr class="hover:bg-slate-800/40 transition-colors">
             <td class="py-3 px-3 font-mono text-slate-400 text-[11px]">${tStr}</td>
+            <td class="py-3 px-3 text-center">${fotoBalitaHtml}</td>
             <td class="py-3 px-3 font-bold text-white">${namaBalitaHtml}</td>
             <td class="py-3 px-3 font-mono">${row.usia_bulan || 0} bln (${row.gender || 'L'})</td>
             <td class="py-3 px-3 font-mono text-cyan-300 font-bold">${(row.berat_kg || 0).toFixed(2)} kg</td>
@@ -1116,11 +1550,12 @@
         return;
       }
 
-      let csv = "Timestamp,Nama Balita,NIK ID,Usia (Bulan),Jenis Kelamin,Nama Orang Tua,Berat (kg),Tinggi (cm),IMT,Suhu (C),BPM,SpO2 (%),Status Stunting,Status Gizi\n";
+      let csv = "Timestamp,Nama Balita,NIK ID,Usia (Bulan),Jenis Kelamin,Nama Orang Tua,Foto Tersedia,Berat (kg),Tinggi (cm),IMT,Suhu (C),BPM,SpO2 (%),Status Stunting,Status Gizi\n";
 
       riwayatDataList.forEach(r => {
         const d = r.timestamp ? new Date(r.timestamp).toISOString() : "";
-        csv += `"${d}","${r.nama_balita || ''}","${r.nik_id || ''}",${r.usia_bulan || 0},"${r.gender || ''}","${r.nama_orangtua || ''}",${r.berat_kg || 0},${r.tinggi_cm || 0},${r.imt || 0},${r.suhu || 0},${r.bpm || 0},${r.spo2 || 0},"${r.status_stunting || ''}","${r.status_gizi || ''}"\n`;
+        const adaFoto = r.foto_balita ? "Ya" : "Tidak";
+        csv += `"${d}","${r.nama_balita || ''}","${r.nik_id || ''}",${r.usia_bulan || 0},"${r.gender || ''}","${r.nama_orangtua || ''}","${adaFoto}",${r.berat_kg || 0},${r.tinggi_cm || 0},${r.imt || 0},${r.suhu || 0},${r.bpm || 0},${r.spo2 || 0},"${r.status_stunting || ''}","${r.status_gizi || ''}"\n`;
       });
 
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -1211,6 +1646,7 @@
       }
 
       currentEditKey = key;
+      setEditFoto(item.foto_balita || null);
       document.getElementById("editNama").value = (item.nama_balita && item.nama_balita !== '-') ? item.nama_balita : "";
       document.getElementById("editNik").value = (item.nik_id && item.nik_id !== '-') ? item.nik_id : "";
       document.getElementById("editUsia").value = (item.usia_bulan !== undefined) ? item.usia_bulan : 24;
@@ -1230,6 +1666,7 @@
     function tutupModalEdit() {
       document.getElementById("modalEditBalita").classList.add("hidden");
       currentEditKey = null;
+      setEditFoto(null);
     }
 
     function kalkulasiEditModal() {
@@ -1292,6 +1729,7 @@
         usia_bulan: usia,
         gender: gender,
         nama_orangtua: ibu || "-",
+        foto_balita: currentEditFotoBase64 || null,
         berat_kg: parseFloat(berat.toFixed(2)),
         tinggi_cm: parseFloat(tinggi.toFixed(1)),
         imt: res.imt,
