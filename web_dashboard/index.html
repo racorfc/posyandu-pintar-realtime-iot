@@ -105,9 +105,14 @@
         <span id="soundIcon">🔔</span> Suara: <span id="soundStatus" class="text-brand-green font-bold">ON</span>
       </button>
 
+      <!-- Cetak PDF Lengkap + Foto -->
+      <button onclick="cetakLaporanPdf()" class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white shadow-lg shadow-blue-900/30 transition-all">
+        🖨️ Cetak PDF + Foto
+      </button>
+
       <!-- Ekspor CSV -->
       <button onclick="exportKmsCsv()" class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg shadow-emerald-900/30 transition-all">
-        📥 Unduh Rekap KMS (.CSV)
+        📥 Unduh CSV
       </button>
     </div>
   </header>
@@ -420,10 +425,13 @@
         <p class="text-xs text-brand-muted mt-0.5">Database pemeriksaan realtime Posyandu dari ESP32 CYD & Web</p>
       </div>
 
-      <!-- Pencarian Balita -->
-      <div class="flex items-center gap-2 w-full sm:w-auto">
-        <input type="text" id="searchTable" onkeyup="filterRiwayatTable()" placeholder="Cari Nama / NIK..." class="px-3.5 py-1.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-xs focus:border-brand-cyan focus:outline-none w-full sm:w-60">
+      <!-- Pencarian Balita & Aksi Cetak -->
+      <div class="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+        <input type="text" id="searchTable" onkeyup="filterRiwayatTable()" placeholder="Cari Nama / NIK..." class="px-3.5 py-1.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-xs focus:border-brand-cyan focus:outline-none w-full sm:w-48">
         <span id="totalDataCount" class="text-xs font-mono font-bold text-cyan-400 bg-cyan-500/10 px-2.5 py-1.5 rounded-xl border border-cyan-500/30 whitespace-nowrap">0 Data</span>
+        <button onclick="cetakLaporanPdf()" class="px-3 py-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white text-xs font-bold transition-all flex items-center gap-1 shadow-md shadow-cyan-900/20 whitespace-nowrap">
+          🖨️ Cetak PDF + Foto
+        </button>
       </div>
     </div>
 
@@ -1115,13 +1123,13 @@
       const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
       badge.innerText = isMobile ? (currentFacingMode === 'environment' ? 'HP: Belakang' : 'HP: Depan') : 'Laptop / PC Webcam';
 
-      // Coba akses kamera
+      // Coba akses kamera Full HD
       try {
         const constraints = {
           video: {
             facingMode: isMobile ? { ideal: currentFacingMode } : true,
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
+            width: { ideal: 1920, min: 1280 },
+            height: { ideal: 1080, min: 720 }
           },
           audio: false
         };
@@ -1129,9 +1137,12 @@
         video.srcObject = cameraStream;
         await video.play();
       } catch (err) {
-        console.warn("Gagal dengan facingMode, mencoba default video: true...", err);
+        console.warn("Gagal dengan facingMode ideal, mencoba video standar...", err);
         try {
-          cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          cameraStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: false
+          });
           video.srcObject = cameraStream;
           await video.play();
           badge.innerText = "Webcam Default";
@@ -1162,7 +1173,7 @@
       startCameraStream();
     }
 
-    // 6. Jepret Foto dari Video Viewfinder
+    // 6. Jepret Foto dari Video Viewfinder (Resolusi Tajam HD)
     function jepretFotoKamera() {
       const video = document.getElementById("videoKamera");
       if (!video || !video.videoWidth) {
@@ -1173,7 +1184,7 @@
       const canvas = document.createElement("canvas");
       let w = video.videoWidth;
       let h = video.videoHeight;
-      const maxDim = 500; // Ukuran optimal untuk Firebase RTDB (~30-50 KB)
+      const maxDim = 1080; // Resolusi Tajam HD (sekitar 100-200 KB, sangat aman di Firebase RTDB)
       if (w > maxDim || h > maxDim) {
         if (w > h) {
           h = Math.round((h * maxDim) / w);
@@ -1189,13 +1200,14 @@
       const ctx = canvas.getContext("2d");
       ctx.drawImage(video, 0, 0, w, h);
 
-      const base64Data = canvas.toDataURL("image/jpeg", 0.75);
+      // Kualitas jernih 85%
+      const base64Data = canvas.toDataURL("image/jpeg", 0.85);
       setFotoBalita(base64Data);
       tutupModalKamera();
       playBeep(900, 150);
     }
 
-    // 7. Handle Upload dari Kamera Bawaan HP / File Picker
+    // 7. Handle Upload dari Kamera Bawaan HP / File Picker (Resolusi Tajam HD)
     function handleNativeCameraUpload(event) {
       const file = event.target.files && event.target.files[0];
       if (!file) return;
@@ -1207,7 +1219,7 @@
           const canvas = document.createElement("canvas");
           let w = img.width;
           let h = img.height;
-          const maxDim = 500;
+          const maxDim = 1080; // Resolusi Tajam HD
           if (w > maxDim || h > maxDim) {
             if (w > h) {
               h = Math.round((h * maxDim) / w);
@@ -1222,7 +1234,8 @@
           const ctx = canvas.getContext("2d");
           ctx.drawImage(img, 0, 0, w, h);
 
-          const base64Data = canvas.toDataURL("image/jpeg", 0.75);
+          // Kualitas jernih 85%
+          const base64Data = canvas.toDataURL("image/jpeg", 0.85);
           setFotoBalita(base64Data);
           playBeep(850, 120);
         };
@@ -1314,7 +1327,7 @@
           const canvas = document.createElement("canvas");
           let w = img.width;
           let h = img.height;
-          const maxDim = 500;
+          const maxDim = 1080;
           if (w > maxDim || h > maxDim) {
             if (w > h) {
               h = Math.round((h * maxDim) / w);
@@ -1329,7 +1342,7 @@
           const ctx = canvas.getContext("2d");
           ctx.drawImage(img, 0, 0, w, h);
 
-          const base64Data = canvas.toDataURL("image/jpeg", 0.75);
+          const base64Data = canvas.toDataURL("image/jpeg", 0.85);
           setEditFoto(base64Data);
         };
         img.src = e.target.result;
@@ -1565,6 +1578,128 @@
       a.download = "REKAP_KMS_POSYANDU_" + new Date().toISOString().slice(0, 10) + ".csv";
       a.click();
       URL.revokeObjectURL(url);
+    }
+
+    // ----------------------------------------------------------
+    // H2. CETAK LAPORAN RESMI KMS BALITA LENGKAP DENGAN FOTO (PDF)
+    // ----------------------------------------------------------
+    function cetakLaporanPdf() {
+      if (!riwayatDataList || riwayatDataList.length === 0) {
+        alert("Belum ada data pemeriksaan untuk dicetak!");
+        return;
+      }
+
+      const win = window.open("", "_blank");
+      if (!win) {
+        alert("Pop-up diblokir oleh browser. Izinkan pop-up untuk mencetak laporan.");
+        return;
+      }
+
+      const rowsHtml = riwayatDataList.map((r, idx) => {
+        const d = r.timestamp ? new Date(r.timestamp).toLocaleDateString("id-ID", { day: '2-digit', month: 'short', year: 'numeric' }) : "-";
+        const fotoHtml = r.foto_balita 
+          ? `<img src="${r.foto_balita}" style="width: 55px; height: 55px; object-fit: cover; border-radius: 8px; border: 1px solid #cbd5e1; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">`
+          : `<div style="width: 55px; height: 55px; background: #f1f5f9; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 22px; color: #94a3b8; border: 1px solid #e2e8f0;">👤</div>`;
+        
+        const isStunting = r.status_stunting && r.status_stunting.includes("PENDEK");
+        const isGiziKurang = r.status_gizi && (r.status_gizi.includes("BURUK") || r.status_gizi.includes("KURANG"));
+
+        return `
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="padding: 8px; text-align: center; color: #64748b; font-family: monospace;">${idx + 1}</td>
+            <td style="padding: 8px; text-align: center;">${fotoHtml}</td>
+            <td style="padding: 8px;">
+              <b style="color: #0f172a; font-size: 13px;">${escapeHtml(r.nama_balita || '-')}</b><br>
+              <small style="color: #64748b; font-family: monospace;">NIK: ${escapeHtml(r.nik_id || '-')}</small>
+            </td>
+            <td style="padding: 8px; text-align: center;">${r.usia_bulan || 0} bln (${r.gender || 'L'})</td>
+            <td style="padding: 8px; text-align: center; font-weight: bold; color: #0284c7;">${(r.berat_kg || 0).toFixed(2)} kg</td>
+            <td style="padding: 8px; text-align: center; font-weight: bold; color: #d97706;">${(r.tinggi_cm || 0).toFixed(1)} cm</td>
+            <td style="padding: 8px; text-align: center; font-family: monospace;">${r.imt ? r.imt.toFixed(1) : '-'}</td>
+            <td style="padding: 8px; text-align: center; color: #16a34a; font-weight: 600;">${r.suhu ? r.suhu.toFixed(1) + '°C' : '-'}</td>
+            <td style="padding: 8px; text-align: center;">
+              <span style="display: inline-block; padding: 3px 8px; border-radius: 6px; font-weight: bold; font-size: 10px; ${isStunting ? 'background: #fee2e2; color: #dc2626; border: 1px solid #f87171;' : 'background: #dcfce7; color: #16a34a; border: 1px solid #86efac;'}">
+                ${escapeHtml(r.status_stunting || 'Normal')}
+              </span>
+            </td>
+            <td style="padding: 8px; text-align: center;">
+              <span style="display: inline-block; padding: 3px 8px; border-radius: 6px; font-weight: bold; font-size: 10px; ${isGiziKurang ? 'background: #fef3c7; color: #d97706; border: 1px solid #fcd34d;' : 'background: #e0f2fe; color: #0284c7; border: 1px solid #7dd3fc;'}">
+                ${escapeHtml(r.status_gizi || 'Gizi Baik')}
+              </span>
+            </td>
+            <td style="padding: 8px; color: #334155;">${escapeHtml(r.nama_orangtua || '-')}</td>
+          </tr>
+        `;
+      }).join("");
+
+      win.document.write(\`
+        <!DOCTYPE html>
+        <html lang="id">
+        <head>
+          <meta charset="UTF-8">
+          <title>Laporan Rekam Medis & Foto Balita - Posyandu Pintar</title>
+          <style>
+            @page { size: A4 landscape; margin: 12mm; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #1e293b; padding: 15px; margin: 0; background: #fff; }
+            h1, h2, p { margin: 0; }
+            .header { display: flex; align-items: center; justify-content: space-between; border-bottom: 3px double #0284c7; padding-bottom: 12px; margin-bottom: 16px; }
+            table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 8px; }
+            th { background: #f8fafc; border-bottom: 2px solid #cbd5e1; padding: 8px 6px; text-transform: uppercase; font-size: 10px; color: #475569; }
+            .btn-print { background: #0284c7; color: white; border: none; padding: 9px 18px; border-radius: 8px; font-weight: bold; font-size: 13px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.15); }
+            .btn-print:hover { background: #0369a1; }
+            @media print {
+              .no-print { display: none !important; }
+              body { padding: 0; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="no-print" style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; background: #f0f9ff; padding: 12px 16px; border-radius: 10px; border: 1px solid #bae6fd;">
+            <div style="font-size: 12px; color: #0369a1;">
+              💡 <b>Petunjuk Cetak:</b> Klik tombol di kanan untuk langsung mencetak atau memilih <i>"Save as PDF"</i> di peramban Anda.
+            </div>
+            <button class="btn-print" onclick="window.print()">🖨️ Cetak / Simpan PDF Sekarang</button>
+          </div>
+          <div class="header">
+            <div>
+              <h1 style="font-size: 20px; color: #0f172a; font-weight: 800;">🏥 POSYANDU PINTAR IoT - REKAM MEDIS & KMS DIGITAL</h1>
+              <p style="font-size: 12px; color: #64748b; margin-top: 3px;">Laporan Rekapitulasi Antropometri Balita, Deteksi Stunting (Kemenkes/WHO) & Dokumentasi Foto</p>
+            </div>
+            <div style="text-align: right; font-size: 11px; color: #64748b; line-height: 1.5;">
+              Tanggal Cetak: <b>\${new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })}</b><br>
+              Total Balita: <b style="color: #0284c7;">\${riwayatDataList.length} Anak</b>
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 30px;">No</th>
+                <th style="width: 70px;">Foto</th>
+                <th>Nama Balita</th>
+                <th style="width: 90px;">Usia/JK</th>
+                <th style="width: 70px;">Berat</th>
+                <th style="width: 70px;">Tinggi</th>
+                <th style="width: 50px;">IMT</th>
+                <th style="width: 60px;">Suhu</th>
+                <th style="width: 110px;">Status Stunting</th>
+                <th style="width: 100px;">Status Gizi</th>
+                <th>Nama Orang Tua</th>
+              </tr>
+            </thead>
+            <tbody>
+              \${rowsHtml}
+            </tbody>
+          </table>
+          <div style="margin-top: 35px; display: flex; justify-content: flex-end; page-break-inside: avoid;">
+            <div style="text-align: center; width: 220px; font-size: 12px; color: #334155;">
+              Petugas Posyandu / Bidan Desa,<br><br><br><br><br>
+              <b>( .................................................... )</b>
+            </div>
+          </div>
+        </body>
+        </html>
+      \`);
+      win.document.close();
     }
 
     // ----------------------------------------------------------
