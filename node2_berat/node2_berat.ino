@@ -1,21 +1,28 @@
 /* =================================================================================
  * SMART HEALTH POSYANDU IoT (V4 FIREBASE ECOSYSTEM)
- * NODE 2: ESP32-C3 - Timbangan Digital Balita (HX711 Load Cell)
+ * NODE 2: ESP32-C3 - Timbangan Digital 40KG (Single Load Cell HX711)
+ * 
+ * Spesifikasi Hardware:
+ * - 1x Single Load Cell Batang (Kapasitas Maksimal 40 KG)
+ * - Pinout ESP32-C3:
+ *     * HX711 DT   -> GPIO 4
+ *     * HX711 SCK  -> GPIO 5
+ *     * BOOT Key   -> GPIO 9
+ *     * VCC        -> 5V (atau 3V3), GND -> GND
+ * - Wiring 4 Kabel Load Cell 40KG ke HX711:
+ *     * MERAH  -> E+ (Excitation +)
+ *     * HITAM  -> E- (Excitation -)
+ *     * HIJAU  -> A+ (Signal +)
+ *     * PUTIH  -> A- (Signal -)
  * 
  * Fitur:
- * - Pembacaan berat badan presisi dalam Kilogram (kg).
- * - Tombol BOOT Multifungsi (GPIO 9):
- *     * Klik Cepat (< 1.5 detik) : TARE (Nol-kan timbangan).
- *     * Tahan Lama (>= 4 detik)  : KALIBRASI BEBAN ACUAN (misal 900g).
- * - Faktor kalibrasi tersimpan permanen di memori NVS Flash (Preferences.h).
- * - Menerima perintah TARE jarak jauh via ESP-NOW dari ESP32 CYD Gateway.
- * - Mengirimkan data berat badan secara real-time via ESP-NOW Broadcast.
- * 
- * Pinout ESP32-C3:
- * - HX711 DT   -> GPIO 4
- * - HX711 SCK  -> GPIO 5
- * - BOOT Key   -> GPIO 9
- * - VCC        -> 3.3V / 5V, GND -> GND
+ * - Pembacaan berat badan presisi 0.00 s/d 40.00 kg.
+ * - Kalibrasi Fleksibel via Serial Monitor (Ketik 't' untuk Tare, ketik angka misal '5' untuk 5kg).
+ * - Kalibrasi Fleksibel Wireless via ESP-NOW dari Layar CYD Gateway (Channel 11).
+ * - Tombol BOOT Fisik (GPIO 9):
+ *     * Klik Cepat (< 1.5 detik) : TARE (Nol-kan).
+ *     * Tahan Lama (>= 4 detik)  : Kalibrasi Beban Acuan.
+ * - Faktor Kalibrasi tersimpan permanen di memori NVS Flash (Preferences.h).
  * ================================================================================= */
 
 #include <WiFi.h>
@@ -27,7 +34,7 @@
 #define WIFI_CHANNEL 11
 
 // ==========================================
-// 1. KONFIGURASI HARDWARE & PIN
+// 1. KONFIGURASI PIN & HARDWARE
 // ==========================================
 const int LOADCELL_DOUT_PIN = 4; // DT HX711
 const int LOADCELL_SCK_PIN  = 5; // SCK HX711
@@ -42,7 +49,7 @@ Preferences preferences;
 // Paket Kirim (Node 2 -> CYD Hub)
 typedef struct struct_msg_berat {
   int node_id;      // 2 = Timbangan
-  float berat_kg;   // Berat dalam satuan Kilogram (contoh: 12.45 kg)
+  float berat_kg;   // Berat dalam satuan Kilogram
   int status_kode;  // 0 = Normal, 1 = Tare Berhasil, 2 = Kalibrasi Berhasil
 } struct_msg_berat;
 
@@ -52,21 +59,18 @@ struct_msg_berat myData;
 typedef struct struct_cmd_tare {
   int target_node;  // 2
   int command;      // 1 = Tare, 2 = Calibrate
-  float target_kg;  // Custom target weight (contoh: 57.4, 60.0, 19.0)
+  float target_kg;  // Custom target weight (contoh: 5.0, 10.0, 20.0, 40.0)
 } struct_cmd_tare;
 
 uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 esp_now_peer_info_t peerInfo;
 
 // ==========================================
-// 3. VARIABEL KALIBRASI & TIMING
+// 3. VARIABEL STATE & KALIBRASI
 // ==========================================
-// Berdasarkan data riil beban 920g: Delta Raw = 2971 - 1100 = 1871 count
-// Faktor per gram = 1871 / 920 = 2.0334 count/gram
-float cal_factor = 2.0334;            // Nilai kalibrasi presisi beban 920g
-const float BEBAN_KALIBRASI_G = 920.0;// Beban referensi 920 gram
-float currentWeightGrams = 0.0;
-float currentWeightKg = 0.0;
+float cal_factor = 25.0f;            // Default count per gram untuk loadcell 40kg
+float currentWeightGrams = 0.0f;
+float currentWeightKg = 0.0f;
 
 bool lastButtonState = HIGH;
 unsigned long pressTime = 0;
@@ -76,7 +80,61 @@ unsigned long lastSendTime = 0;
 unsigned long lastSerialTime = 0;
 
 // ==========================================
-// 4. CALLBACK PENERIMA ESP-NOW (REMOTE TARE & KALIBRASI)
+// 4. FUNGSI TARE & KALIBRASI
+// ==========================================
+void executeTare() {
+  Serial.println("\n>>> [TARE] Menol-kan timbangan 40kg...");
+  if (scale.is_ready()) {
+    scale.tare(10);
+    currentWeightGrams = 0.0f;
+    currentWeightKg = 0.0f;
+    myData.status_kode = 1;
+    Serial.println(">>> [TARE SUKSES] Timbangan sekarang: 0.00 kg.\n");
+  } else {
+    Serial.println(">>> [TARE GAGAL] Modul HX711 belum siap!\n");
+  }
+}
+
+void executeCalibration(float targetKg) {
+  if (targetKg < 0.1f || targetKg > 50.0f) {
+    Serial.println(">>> [ERROR] Beban kalibrasi harus antara 0.1 kg s/d 50.0 kg!");
+    return;
+  }
+
+  Serial.printf("\n=====================================================\n");
+  Serial.printf(">>> [MEMULAI KALIBRASI LOAD CELL 40KG]\n");
+  Serial.printf(">>> Target Beban Acuan: %.2f kg (%.0f gram)\n", targetKg, targetKg * 1000.0f);
+  Serial.println(">>> Harap letakkan beban stabil di atas timbangan...");
+  delay(1500);
+
+  if (scale.is_ready()) {
+    long raw_val = scale.get_value(20); // Ambil rata-rata 20 sampel delta
+    float targetGrams = targetKg * 1000.0f;
+
+    if (abs(raw_val) > 100) {
+      cal_factor = (float)abs(raw_val) / targetGrams;
+      scale.set_scale(cal_factor);
+      preferences.putFloat("faktor", cal_factor);
+
+      currentWeightGrams = targetGrams;
+      currentWeightKg = targetKg;
+      myData.status_kode = 2;
+
+      Serial.println("=====================================================");
+      Serial.printf(">>> [KALIBRASI SUKSES!] Faktor Baru: %.4f count/gram\n", cal_factor);
+      Serial.printf(">>> Raw Delta: %ld untuk Beban %.2f kg\n", raw_val, targetKg);
+      Serial.println(">>> TERSIMPAN PERMANEN DI MEMORI FLASH NVS!");
+      Serial.println("=====================================================\n");
+    } else {
+      Serial.printf(">>> [KALIBRASI GAGAL] Delta raw terlalu kecil (%ld). Pastikan beban terpasang!\n\n", raw_val);
+    }
+  } else {
+    Serial.println(">>> [KALIBRASI GAGAL] Modul HX711 tidak merespons!\n\n");
+  }
+}
+
+// ==========================================
+// 5. CALLBACK PENERIMA ESP-NOW (DARI CYD HUB)
 // ==========================================
 void OnDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *incomingData, int len) {
   if (len >= 8) {
@@ -85,74 +143,62 @@ void OnDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *incomingDat
     memcpy(&cmd, incomingData, min((size_t)len, sizeof(cmd)));
 
     if (cmd.target_node == 2) {
-      if (cmd.command == 1) { // TARE
+      if (cmd.command == 1) { // TARE WIRELESS
         Serial.println("\n[ESP-NOW WIRELESS] Menerima instruksi TARE dari CYD Hub!");
-        scale.tare(20);
-        currentWeightGrams = 0.0f;
-        currentWeightKg = 0.0f;
-        myData.status_kode = 1;
+        executeTare();
         esp_now_send(broadcastAddress, (uint8_t *)&myData, sizeof(myData));
-        Serial.println("[ESP-NOW WIRELESS] TARE Berhasil dieksekusi!");
       }
-      else if (cmd.command == 2) { // KALIBRASI BEBAN KUSTOM
+      else if (cmd.command == 2) { // KALIBRASI WIRELESS
         float targetKg = cmd.target_kg;
-        if (targetKg < 0.5f || targetKg > 200.0f) targetKg = 57.4f;
+        if (targetKg < 0.1f || targetKg > 50.0f) targetKg = 5.0f;
 
-        Serial.printf("\n[ESP-NOW WIRELESS] Menerima instruksi KALIBRASI BEBAN: %.2f kg dari CYD Hub...\n", targetKg);
-        delay(300);
-        long raw_val = scale.get_value(25); // Ambil rata-rata 25 sampel presisi
-        float targetGrams = targetKg * 1000.0f;
-        cal_factor = (float)raw_val / targetGrams;
-
-        scale.set_scale(cal_factor);
-        preferences.putFloat("faktor", cal_factor);
-        currentWeightGrams = targetGrams;
-        currentWeightKg = targetKg;
-        myData.status_kode = 2; // Kode Kalibrasi Sukses
-
+        Serial.printf("\n[ESP-NOW WIRELESS] Menerima instruksi KALIBRASI: %.2f kg dari CYD Hub...\n", targetKg);
+        executeCalibration(targetKg);
         esp_now_send(broadcastAddress, (uint8_t *)&myData, sizeof(myData));
-
-        Serial.println("=====================================================");
-        Serial.printf("[ESP-NOW WIRELESS] KALIBRASI SUKSES! Faktor: %.4f\n", cal_factor);
-        Serial.printf("[ESP-NOW WIRELESS] Raw Delta: %ld untuk Beban %.2f kg\n", raw_val, targetKg);
-        Serial.println("=====================================================");
       }
     }
   }
 }
 
 // ==========================================
-// 5. SETUP
+// 6. SETUP
 // ==========================================
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  Serial.println("\n================================================");
-  Serial.println("  [NODE 2] TIMBANGAN DIGITAL BALITA (HX711)    ");
-  Serial.println("  Kalibrasi Beban Acuan: 920 Gram              ");
-  Serial.println("================================================");
+  Serial.println("\n=======================================================");
+  Serial.println("  [NODE 2] TIMBANGAN DIGITAL LOAD CELL 40 KG (HX711)   ");
+  Serial.println("  Kapasitas Maksimal: 40.00 KG                         ");
+  Serial.println("  Pinout: DT = GPIO 4 | SCK = GPIO 5                   ");
+  Serial.println("=======================================================");
 
   pinMode(PIN_BOOT, INPUT_PULLUP);
 
   // A. Membaca Memori Flash NVS untuk Kalibrasi
   preferences.begin("timbangan", false);
-  cal_factor = preferences.getFloat("faktor", 2.0334f);
-  if (cal_factor == 420.0f || cal_factor <= 0.0f || cal_factor == 1.0f) {
-    cal_factor = 2.0334f;
-    preferences.putFloat("faktor", cal_factor);
+  cal_factor = preferences.getFloat("faktor", 25.0f);
+  if (cal_factor <= 0.001f || cal_factor > 1000.0f) {
+    cal_factor = 25.0f;
   }
-  Serial.printf("[NVS] Faktor Kalibrasi Aktif: %.4f (1871 count / 920g)\n", cal_factor);
+  Serial.printf("[NVS] Faktor Kalibrasi Aktif: %.4f count/gram\n", cal_factor);
 
-  // B. Inisialisasi Modul HX711 & Auto-Tare
-  scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
+  // B. Inisialisasi Modul HX711 (fastProcessor = true untuk ESP32 160MHz)
+  scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN, true);
+  
   unsigned long startWait = millis();
-  while (!scale.is_ready() && (millis() - startWait < 2000)) {
+  while (!scale.is_ready() && (millis() - startWait < 1500)) {
     delay(50);
   }
-  delay(1000); // Tunggu filter internal HX711 stabil
+
   scale.set_scale(cal_factor);
-  scale.tare(20); // Nol-kan beban saat pertama kali alat menyala (20 sampel)
-  Serial.println("[OK] HX711 Siap & Auto-Tared (0.00 kg).");
+
+  if (scale.is_ready()) {
+    delay(300);
+    scale.tare(10); // Nol-kan beban saat alat pertama menyala
+    Serial.println("[OK] HX711 Terdeteksi & Auto-Tared (0.00 kg).");
+  } else {
+    Serial.println("[WARNING] HX711 belum merespons saat boot. Melanjutkan tanpa freeze...");
+  }
 
   // C. Inisialisasi WiFi & ESP-NOW di Channel 11
   WiFi.mode(WIFI_STA);
@@ -163,26 +209,27 @@ void setup() {
 
   if (esp_now_init() != ESP_OK) {
     Serial.println("[ERROR] Inisialisasi ESP-NOW Gagal!");
-    return;
-  }
-  esp_now_register_recv_cb(OnDataRecv);
-
-  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
-  peerInfo.channel = WIFI_CHANNEL;
-  peerInfo.encrypt = false;
-  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-    Serial.println("[ERROR] Gagal Daftarkan Peer Broadcast!");
   } else {
-    Serial.printf("[OK] ESP-NOW Siap Berkomunikasi di Channel %d.\n", WIFI_CHANNEL);
+    esp_now_register_recv_cb(OnDataRecv);
+    memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+    peerInfo.channel = WIFI_CHANNEL;
+    peerInfo.encrypt = false;
+    if (esp_now_add_peer(&peerInfo) == ESP_OK) {
+      Serial.printf("[OK] ESP-NOW Channel %d Siap (Broadcast Ready).\n", WIFI_CHANNEL);
+    }
   }
 
   myData.node_id = 2;
-  myData.berat_kg = 0.0;
+  myData.berat_kg = 0.0f;
   myData.status_kode = 0;
+  Serial.println("=======================================================\n");
+  Serial.println(">>> PETUNJUK KALIBRASI SERIAL:");
+  Serial.println(">>> 1. Ketik 't' lalu Enter untuk TARE (Nol-kan)");
+  Serial.println(">>> 2. Ketik angka bobot (contoh: '5' atau '10.5') lalu Enter untuk KALIBRASI\n");
 }
 
 // ==========================================
-// 6. LOOP UTAMA
+// 7. LOOP UTAMA
 // ==========================================
 void loop() {
   // ----------------------------------------
@@ -193,90 +240,68 @@ void loop() {
     input.trim();
     if (input.length() > 0) {
       if (input.equalsIgnoreCase("t") || input.equalsIgnoreCase("tare") || input == "0") {
-        Serial.println("\n>>> [TARE] Menol-kan timbangan...");
-        scale.tare(20);
-        currentWeightGrams = 0.0f;
-        currentWeightKg = 0.0f;
-        Serial.println(">>> [TARE SELESAI] Nilai timbangan sekarang: 0.00 kg.\n");
+        executeTare();
       } else {
         String numStr = input;
         if (numStr.startsWith("cal ") || numStr.startsWith("CAL ")) {
           numStr = numStr.substring(4);
         }
         float targetKg = numStr.toFloat();
-        if (targetKg > 0.5f && targetKg <= 200.0f) {
-          Serial.printf("\n>>> [MEMULAI KALIBRASI] Target Beban: %.2f kg\n", targetKg);
-          Serial.println(">>> Harap berdiri diam & tenang di atas timbangan selama 2 detik...");
-          delay(1500);
-          long raw_val = scale.get_value(25); // Ambil rata-rata 25 sampel presisi
-          float targetGrams = targetKg * 1000.0f;
-          cal_factor = (float)raw_val / targetGrams;
-
-          scale.set_scale(cal_factor);
-          preferences.putFloat("faktor", cal_factor);
-          currentWeightGrams = targetGrams;
-          currentWeightKg = targetKg;
-
-          Serial.println("=====================================================");
-          Serial.printf(">>> [KALIBRASI SUKSES] Faktor Baru: %.4f\n", cal_factor);
-          Serial.printf(">>> Raw Delta: %ld untuk Beban %.2f kg\n", raw_val, targetKg);
-          Serial.println(">>> FAKTOR KALIBRASI TERSIMPAN DI MEMORI FLASH!");
-          Serial.println("=====================================================\n");
-          myData.status_kode = 2;
+        if (targetKg >= 0.1f && targetKg <= 50.0f) {
+          executeCalibration(targetKg);
         } else {
-          Serial.println(">>> [BANTUAN] Ketik 't' untuk Tare, atau ketik angka berat acuan (contoh: 57.4)");
+          Serial.println(">>> [BANTUAN SERIAL]");
+          Serial.println(">>> Ketik 't' lalu Enter untuk TARE (Nol-kan)");
+          Serial.println(">>> Ketik angka berat beban (contoh: 5 atau 10.5) untuk KALIBRASI");
         }
       }
     }
   }
 
   // ----------------------------------------
-  // B. BACA DATA LOAD CELL DENGAN FILTER PEREDAM AYUNAN (EMA)
+  // B. BACA DATA LOAD CELL 40KG DENGAN FILTER EMA
   // ----------------------------------------
-  long currentRaw = 0;
-  if (scale.is_ready()) {
-    currentRaw = scale.get_value(1);
-    float rawGrams = scale.get_units(3);
+  long currentRawDelta = 0;
+  bool hxReady = scale.is_ready();
+  if (hxReady) {
+    currentRawDelta = scale.get_value(1);
+    float rawGrams = scale.get_units(2);
 
-    // Filter EMA (Exponential Moving Average) 70% data lama + 30% data baru
-    // Menghilangkan efek "ngayun" naik turun secara instan
+    // Filter EMA (Exponential Moving Average) 70% lama + 30% baru
     currentWeightGrams = (currentWeightGrams * 0.70f) + (rawGrams * 0.30f);
 
     float tempGrams = currentWeightGrams;
-    // Filter anti-noise saat timbangan kosong (di bawah 50g dianggap nol)
-    if (abs(tempGrams) < 50.0f) {
+    // Filter anti-noise timbangan kosong (< 30g dianggap 0)
+    if (abs(tempGrams) < 30.0f) {
       tempGrams = 0.0f;
     }
-    // Cegah angka negatif getaran lantai
+    // Cegah angka negatif getaran
     if (tempGrams < 0.0f && tempGrams > -100.0f) {
       tempGrams = 0.0f;
     }
 
-    currentWeightKg = tempGrams / 1000.0f; // Konversi gram ke kilogram
+    currentWeightKg = tempGrams / 1000.0f;
+
+    // Batas maksimal load cell 40kg (proteksi over-capacity display)
+    if (currentWeightKg > 45.0f) {
+      currentWeightKg = 45.0f;
+    }
   }
 
   // ----------------------------------------
-  // C. SMART BUTTON BOOT (TARE & KALIBRASI FISIK)
+  // C. SMART BUTTON BOOT (GPIO 9)
   // ----------------------------------------
   int reading = digitalRead(PIN_BOOT);
 
-  // Tombol mulai ditekan
   if (reading == LOW && lastButtonState == HIGH) {
     pressTime = millis();
     actionDone = false;
   }
 
-  // 1. TAHAN LAMA (>= 4 DETIK) = KALIBRASI ULANG FISIK
+  // 1. TAHAN LAMA (>= 4 DETIK) = KALIBRASI ACUAN (5 KG)
   if (reading == LOW && !actionDone && (millis() - pressTime >= 4000)) {
-    Serial.println("\n[KALIBRASI TOMBOL] Memulai kalibrasi fisik 57.4kg...");
-    long raw_val = scale.get_value(20);
-    cal_factor = (float)raw_val / (57.4f * 1000.0f);
-
-    scale.set_scale(cal_factor);
-    preferences.putFloat("faktor", cal_factor);
-
-    Serial.printf("[KALIBRASI SELESAI] Faktor baru: %.4f tersimpan di NVS Flash!\n", cal_factor);
-    myData.status_kode = 2;
+    Serial.println("\n[KALIBRASI TOMBOL] Memulai kalibrasi beban acuan 5.0 kg...");
+    executeCalibration(5.0f);
     actionDone = true;
   }
 
@@ -284,10 +309,7 @@ void loop() {
   if (reading == HIGH && lastButtonState == LOW) {
     long duration = millis() - pressTime;
     if (duration > 50 && duration < 1500 && !actionDone) {
-      Serial.println("\n[TARE TOMBOL] Menol-kan timbangan...");
-      scale.tare(20);
-      currentWeightGrams = 0.0f;
-      myData.status_kode = 1;
+      executeTare();
       actionDone = true;
     }
   }
@@ -299,7 +321,6 @@ void loop() {
   if (millis() - lastSendTime >= 200) {
     lastSendTime = millis();
 
-    // Pastikan channel tetap 11
     esp_wifi_set_channel(WIFI_CHANNEL, WIFI_SECOND_CHAN_NONE);
 
     myData.node_id = 2;
@@ -307,18 +328,21 @@ void loop() {
 
     esp_now_send(broadcastAddress, (uint8_t *)&myData, sizeof(myData));
 
-    // Reset status kode setelah terkirim
     if (myData.status_kode != 0) {
       myData.status_kode = 0;
     }
   }
 
   // ----------------------------------------
-  // E. SERIAL MONITOR DIAGNOSTIK (Tiap 500ms)
+  // E. SERIAL MONITOR DIAGNOSTIK (Tiap 400ms)
   // ----------------------------------------
-  if (millis() - lastSerialTime >= 500) {
+  if (millis() - lastSerialTime >= 400) {
     lastSerialTime = millis();
-    Serial.printf("[NODE 2] Berat: %.2f kg (%.0f gram | Raw: %ld) | Faktor: %.4f | ESP-NOW: TERKIRIM\n",
-      currentWeightKg, currentWeightGrams, currentRaw, cal_factor);
+    if (hxReady) {
+      Serial.printf("[NODE 2 40KG] Berat: %.2f kg (%.0f g) | Raw Delta: %ld | Faktor: %.4f | ESP-NOW: OK\n",
+        currentWeightKg, currentWeightGrams, currentRawDelta, cal_factor);
+    } else {
+      Serial.printf("[NODE 2 WARNING] HX711 TIDAK READY (Cek kabel DT di GPIO4, SCK di GPIO5, VCC 5V)\n");
+    }
   }
 }
