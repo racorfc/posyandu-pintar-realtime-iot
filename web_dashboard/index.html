@@ -305,10 +305,10 @@
           <input type="text" id="inNik" placeholder="Contoh: 350704xxxxxxxxxx" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm focus:border-brand-cyan focus:outline-none transition-all">
         </div>
 
-        <!-- Usia Bulan -->
+        <!-- Usia Bulan (Tanpa Batasan / Unlimited) -->
         <div>
-          <label class="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">Usia Balita (Bulan) *</label>
-          <input type="number" id="inUsia" required min="0" max="60" value="24" oninput="updateKalkulasiStunting()" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm font-mono focus:border-brand-cyan focus:outline-none transition-all">
+          <label class="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">Usia Balita / Anak (Bulan) *</label>
+          <input type="number" id="inUsia" required min="0" value="24" placeholder="Contoh: 24" oninput="updateKalkulasiStunting()" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm font-mono focus:border-brand-cyan focus:outline-none transition-all">
         </div>
 
         <!-- Jenis Kelamin -->
@@ -560,8 +560,8 @@
           </div>
 
           <div>
-            <label class="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">Usia Balita (Bulan) *</label>
-            <input type="number" id="editUsia" min="0" max="60" required oninput="kalkulasiEditModal()" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm font-mono focus:border-brand-cyan focus:outline-none">
+            <label class="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">Usia Balita / Anak (Bulan) *</label>
+            <input type="number" id="editUsia" min="0" required oninput="kalkulasiEditModal()" placeholder="Contoh: 24" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm font-mono focus:border-brand-cyan focus:outline-none">
           </div>
 
           <div>
@@ -1019,9 +1019,13 @@
     // D. KALKULASI ANTROPOMETRI & DETEKSI STUNTING (WHO/KEMENKES)
     // ----------------------------------------------------------
     function hitungStatusKlinis(usiaBulan, gender, tinggi, berat) {
-      // Standar Median Tinggi menurut Umur (WHO Simplifikasi Balita 0-60 Bulan)
+      // Standar Median Tinggi menurut Umur (WHO Balita & Anak)
       let medianTB = 50.0 + (usiaBulan * 1.5);
-      if (usiaBulan > 12) medianTB = 75.0 + ((usiaBulan - 12) * 0.9);
+      if (usiaBulan > 12 && usiaBulan <= 60) {
+        medianTB = 75.0 + ((usiaBulan - 12) * 0.9);
+      } else if (usiaBulan > 60) {
+        medianTB = 118.0 + ((usiaBulan - 60) * 0.5);
+      }
       if (gender === 'P') medianTB -= 1.0;
 
       const batasStunted = medianTB * 0.91;
@@ -1043,7 +1047,11 @@
 
       // Standar Berat menurut Umur (WHO)
       let medianBB = 3.3 + (usiaBulan * 0.6);
-      if (usiaBulan > 12) medianBB = 10.0 + ((usiaBulan - 12) * 0.25);
+      if (usiaBulan > 12 && usiaBulan <= 60) {
+        medianBB = 10.0 + ((usiaBulan - 12) * 0.25);
+      } else if (usiaBulan > 60) {
+        medianBB = 22.0 + ((usiaBulan - 60) * 0.22);
+      }
       if (gender === 'P') medianBB -= 0.5;
 
       const batasGiziKurang = medianBB * 0.80;
